@@ -848,6 +848,11 @@ function AppProvider({children}) {
     if (c) localStorage.setItem('eos-active-campaign', JSON.stringify(c));
     else localStorage.removeItem('eos-active-campaign');
   }, []);
+  const [legalTab, setLegalTab] = useState('terms');
+  const goToLegal = useCallback((tab) => {
+    if (tab) setLegalTab(tab);
+    setView('legal');
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -879,7 +884,8 @@ function AppProvider({children}) {
     cmdOpen, setCmdOpen, latestStrategy, setLatestStrategy, vaultOpen, setVaultOpen,
     vaultLoadHandler, setVaultLoadHandler,
     activeCampaign, setActiveCampaign, campaigns, setCampaigns,
-  }), [theme, lang, t, view, toasts, drawerOpen, drawerTab, sidebarOpen, cmdOpen, latestStrategy, vaultOpen, vaultLoadHandler, activeCampaign, campaigns, addToast, toggleTheme, setActiveCampaign]);
+    legalTab, setLegalTab, goToLegal,
+  }), [theme, lang, t, view, toasts, drawerOpen, drawerTab, sidebarOpen, cmdOpen, latestStrategy, vaultOpen, vaultLoadHandler, activeCampaign, campaigns, legalTab, addToast, toggleTheme, setActiveCampaign, goToLegal]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
@@ -1203,7 +1209,7 @@ function SVGChart({data, dataKey, color, height = 280}) {
    LANDING PAGE — SUPERNOVA
    ============================================================ */
 function LandingPage() {
-  const {setView, toggleTheme, theme, t, lang, setLang} = useApp();
+  const {setView, toggleTheme, theme, t, lang, setLang, goToLegal} = useApp();
 
   return (
     <div>
@@ -1246,9 +1252,9 @@ function LandingPage() {
         <div className="hero-orb hero-orb-3"></div>
         <div className="hero-inner">
           <div className="hero-eyebrow"><span className="pulse-dot"></span> SUPERNOVA EDITOR — CONTENT CREATION OS</div>
-          <h1>One topic.<br/><span className="yellow">Six formats.</span><br/>Zero guesswork.</h1>
+          <h1>One topic.<br/><span className="yellow">Twelve assets.</span><br/>Zero guesswork.</h1>
           <p className="hero-sub">
-            The all-in-one content operating system that turns <strong>one idea</strong> into <strong>46 production-ready assets</strong> across Instagram, TikTok, YouTube, LinkedIn, and Email. Built on 8 proven frameworks. Deployed over 14 days. Automatically.
+            The all-in-one content operating system that turns <strong>one idea</strong> into <strong>12 distinct asset types</strong> — Reel, Carousel, Long-Form Video, <strong>SEO Blog</strong>, Thumbnails, Email, Lead Magnet, Brain Score, Workflows, Vault, Collab Packages, and Comment Monitor. Across Instagram, TikTok, YouTube, LinkedIn, Facebook, WordPress, Ghost, and Email. <strong>Powered by Claude AI.</strong>
           </p>
           <div className="hero-ctas">
             <button className="btn btn-primary btn-lg" onClick={() => setView('dashboard')}>{t('launchApp')}</button>
@@ -1283,22 +1289,28 @@ function LandingPage() {
         <div className="wrap">
           <div className="sec-head">
             <div className="eyebrow">The Arsenal</div>
-            <h2>One topic. <span className="yellow">Six weapons.</span></h2>
-            <p>Every piece of content serves a specific job in the audience journey. From awareness to loyalty, each format compounds the one before it.</p>
+            <h2>One topic. <span className="yellow">Twelve weapons.</span></h2>
+            <p>Every piece of content serves a specific job in the audience journey. From awareness to loyalty to revenue, each asset compounds the one before it. All powered by Claude AI + Ideogram.</p>
           </div>
           <div className="features-grid">
             {[
               {idx:'01',title:'Short-Form Reel',desc:'60-90 seconds. Stop the scroll. HookPoint methodology. Teleprompter-assisted recording with dual camera reaction mode.',icon:Icons.film},
-              {idx:'02',title:'Companion Carousel',desc:'9 slides, 27 Ideogram-generated images. Engineered for saves — the #1 algorithm signal. AI-scored before publish.',icon:Icons.image},
-              {idx:'03',title:'Long-Form YouTube',desc:'25-35 minutes. Multi-chapter structure with retention hooks every 3-5 minutes. Neural impact analysis built in.',icon:Icons.video},
-              {idx:'04',title:'GIF & Email Embed',desc:'Auto-convert clips to GIFs. Natural email embed with Resend API. Replace HeyGen with native video-in-email.',icon:Icons.mail},
-              {idx:'05',title:'Notion Lead Magnet',desc:'Comprehensive reference guide. Convert audience to email subscribers. The bridge from follower to owned relationship.',icon:Icons.download},
-              {idx:'06',title:'Neural Intelligence',desc:'Brain heatmap showing how your content activates prefrontal cortex, amygdala, hippocampus. Data-driven emotional resonance.',icon:Icons.brain},
+              {idx:'02',title:'Companion Carousel',desc:'9 slides, 27 Ideogram-generated images. Engineered for saves — the #1 algorithm signal. Brain Score before publish.',icon:Icons.image},
+              {idx:'03',title:'Long-Form YouTube',desc:'25-35 minutes. Multi-chapter structure with retention hooks every 3-5 minutes. Brain Score analysis built in.',icon:Icons.video},
+              {idx:'04',title:'SEO Blog Post',desc:'1500-3000 word long-form posts in any tone. One-click native publish to WordPress + Ghost. Markdown + HTML + webhook export. Auto-image generation.',icon:Icons.type,badge:'NEW'},
+              {idx:'05',title:'Thumbnail Studio',desc:'A/B variants across 5 platform sizes. Real Ideogram V3 generation. Smart-crop face detection. Click any AI render to apply as background.',icon:Icons.image,badge:'NEW'},
+              {idx:'06',title:'GIF & Email Embed',desc:'Auto-convert clips to GIFs. Native video-in-email via Resend. Welcome sequence + lead-magnet emails included.',icon:Icons.mail},
+              {idx:'07',title:'Lead Magnet Funnel',desc:'Every strategy gets a public landing page in one click. Email opt-in + 5-email nurture sequence + DM templates. Bridge follower → owned relationship.',icon:Icons.download},
+              {idx:'08',title:'Brain Score (v0)',desc:'18-feature heuristic. 6 brain regions activated. 4 dimension scores (Hook/Retention/Reward/Algorithm Fit). Self-improves on your engagement data.',icon:Icons.brain},
+              {idx:'09',title:'Workflows',desc:'Six chained recipes. One topic → 16 deliverables (5 languages × scripts × posts). One post → 84 derivatives over 14 days. One click.',icon:Icons.zap,badge:'NEW'},
+              {idx:'10',title:'Strategy Vault',desc:'Every strategy auto-saves. 3-level drill-down: Strategy → Sections → Scripts. Search, recall, one-click load to teleprompter from any tab.',icon:Icons.search},
+              {idx:'11',title:'Collaboration Packages',desc:'Turnkey packages to collaborators with caption, hashtags, posting time, brand voice, DM templates. Tracked from sent → viewed → posted → confirmed.',icon:Icons.users},
+              {idx:'12',title:'Comment Monitor',desc:'Auto-hide negative comments. Auto-reply to FAQs. Flag spam. FB / IG / YT / LinkedIn via Pages API. Sentiment + KPI dashboard.',icon:Icons.shield},
             ].map(f => (
               <div className="feature-card" key={f.idx}>
                 <div className="idx">{f.idx}</div>
                 <div className="icon-box">{f.icon}</div>
-                <h3>{f.title}</h3>
+                <h3>{f.title} {f.badge && <span style={{fontSize:'.55em',padding:'.15rem .4rem',background:'var(--yellow)',color:'#0A0A14',borderRadius:4,fontWeight:800,letterSpacing:'.04em',marginLeft:6,verticalAlign:'middle'}}>{f.badge}</span>}</h3>
                 <p>{f.desc}</p>
               </div>
             ))}
@@ -1555,7 +1567,7 @@ function LandingPage() {
 
       <section className="final-cta">
         <h2>Start Creating.<br/>Stop Guessing.</h2>
-        <p>One topic becomes 46 assets. Neural-analyzed. Teleprompter-recorded. Auto-deployed across 5 platforms and email. The machine runs while you build your business.</p>
+        <p>One topic becomes 12 distinct asset types: Reel, Carousel, Long-Form, <strong>SEO Blog</strong>, Thumbnails, Email, Lead Magnet, Brain Score, Workflows, Vault, Collab Packages, Comment Monitor. Brain-scored. Teleprompter-recorded. Auto-deployed across IG, TikTok, YouTube, LinkedIn, Facebook, WordPress, Ghost, and Email. Powered by Claude AI.</p>
         <button className="btn btn-lg" onClick={() => setView('dashboard')}>{t('launchApp')}</button>
       </section>
 
@@ -1574,10 +1586,10 @@ function LandingPage() {
             <div className="footer-col"><h4>New in Editor</h4><a href="#">Workflows</a><a href="#">Blog Builder</a><a href="#">Brain Score</a><a href="#">Strategy Vault</a></div>
             <div className="footer-col">
               <h4>Legal</h4>
-              <a href="?view=terms" onClick={(e) => {e.preventDefault(); setView('legal');}}>Terms of Service</a>
-              <a href="?view=privacy" onClick={(e) => {e.preventDefault(); setView('legal');}}>Privacy Policy</a>
-              <a href="?view=sms" onClick={(e) => {e.preventDefault(); setView('legal');}}>SMS Terms (10DLC)</a>
-              <a href="?view=email" onClick={(e) => {e.preventDefault(); setView('legal');}}>Email Terms</a>
+              <a href="?view=terms" onClick={(e) => {e.preventDefault(); goToLegal('terms');}}>Terms of Service</a>
+              <a href="?view=privacy" onClick={(e) => {e.preventDefault(); goToLegal('privacy');}}>Privacy Policy</a>
+              <a href="?view=sms" onClick={(e) => {e.preventDefault(); goToLegal('sms');}}>SMS Terms (10DLC)</a>
+              <a href="?view=email" onClick={(e) => {e.preventDefault(); goToLegal('email');}}>Email Terms</a>
               <a href="mailto:support@raraavismarketing.com">Contact / Data Requests</a>
             </div>
           </div>
@@ -2649,6 +2661,9 @@ function EditorView() {
         <button className="btn btn-primary btn-sm" onClick={runAutoEdit}>{Icons.zap} One-Click Edit</button>
       </div>
 
+      {/* SCRIPT EDITOR — Claude rewrite */}
+      <ScriptEditorCard />
+
       {/* AUTO-EDIT SIDE PANEL */}
       {autoEditOpen && (
         <div style={{position:'fixed',top:60,right:0,width:'min(380px,100vw)',height:'calc(100vh - 60px)',background:'var(--bg-solid)',borderLeft:'1px solid var(--border-strong)',zIndex:50,overflowY:'auto',boxShadow:'-20px 0 60px rgba(0,0,0,.4)',animation:'fadeUp .3s ease'}}>
@@ -3396,7 +3411,7 @@ function logConsent(identifier, channel, action, source) {
 }
 
 function SettingsView() {
-  const {theme, toggleTheme, lang, setLang, addToast, setView} = useApp();
+  const {theme, toggleTheme, lang, setLang, addToast, setView, goToLegal} = useApp();
   const [settingsTab, setSettingsTab] = useState('profile');
   const [showKeys, setShowKeys] = useState({});
   const [settings, setSettings] = useState({
@@ -3644,7 +3659,7 @@ function SettingsView() {
               }} style={{accentColor:'var(--yellow)',width:18,height:18,marginTop:2}} />
               <div>
                 <div style={{fontWeight:700,fontSize:'.92rem',marginBottom:4}}>I want product news + the 5-email welcome series</div>
-                <div style={{fontSize:'.75rem',color:'var(--text-muted)',lineHeight:1.5}}>By checking this you confirm explicit consent to receive marketing emails from Supernova Editor at the address on file. We'll log your IP, timestamp, and source for compliance. <a href="#" onClick={(e)=>{e.preventDefault();setView('legal');}} style={{color:'var(--yellow)'}}>Read Email Terms</a></div>
+                <div style={{fontSize:'.75rem',color:'var(--text-muted)',lineHeight:1.5}}>By checking this you confirm explicit consent to receive marketing emails from Supernova Editor at the address on file. We'll log your IP, timestamp, and source for compliance. <a href="#" onClick={(e)=>{e.preventDefault();goToLegal('email');}} style={{color:'var(--yellow)'}}>Read Email Terms</a></div>
               </div>
             </label>
           </div>
@@ -3664,7 +3679,7 @@ function SettingsView() {
               }} style={{accentColor:'var(--yellow)',width:18,height:18,marginTop:2}} />
               <div>
                 <div style={{fontWeight:700,fontSize:'.92rem',marginBottom:4}}>I consent to receive automated SMS messages</div>
-                <div style={{fontSize:'.75rem',color:'var(--text-muted)',lineHeight:1.5}}>Frequency: 1-8 messages/week. <strong>Mobile information will not be shared with third parties or affiliates for marketing or promotional purposes.</strong> Reply STOP at any time. <a href="#" onClick={(e)=>{e.preventDefault();setView('legal');}} style={{color:'var(--yellow)'}}>Read full SMS Terms</a> · <a href="#" onClick={(e)=>{e.preventDefault();setView('legal');}} style={{color:'var(--yellow)'}}>Privacy Policy</a></div>
+                <div style={{fontSize:'.75rem',color:'var(--text-muted)',lineHeight:1.5}}>Frequency: 1-8 messages/week. <strong>Mobile information will not be shared with third parties or affiliates for marketing or promotional purposes.</strong> Reply STOP at any time. <a href="#" onClick={(e)=>{e.preventDefault();goToLegal('sms');}} style={{color:'var(--yellow)'}}>Read full SMS Terms</a> · <a href="#" onClick={(e)=>{e.preventDefault();goToLegal('privacy');}} style={{color:'var(--yellow)'}}>Privacy Policy</a></div>
               </div>
             </label>
           </div>
@@ -3913,10 +3928,10 @@ const THUMB_TEMPLATES = [
 ];
 
 function ThumbnailStudioView() {
-  const {addToast} = useApp();
+  const {addToast, activeCampaign} = useApp();
   const [selectedTemplate, setSelectedTemplate] = useState(THUMB_TEMPLATES[0]);
-  const [thumbText, setThumbText] = useState('Why Most AI Tools Fail');
-  const [thumbSubtext, setThumbSubtext] = useState('And what to do instead');
+  const [thumbText, setThumbText] = useState(activeCampaign?.name || 'Why Most AI Tools Fail');
+  const [thumbSubtext, setThumbSubtext] = useState(activeCampaign?.topic || 'And what to do instead');
   const [fontSize, setFontSize] = useState(48);
   const [textColor, setTextColor] = useState('#FFFFFF');
   const [bgColor, setBgColor] = useState('#0A0A14');
@@ -3925,6 +3940,67 @@ function ThumbnailStudioView() {
   const [variants, setVariants] = useState([1,2,3]);
   const [activeVariant, setActiveVariant] = useState(0);
   const [platformPreview, setPlatformPreview] = useState('youtube');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiStyle, setAiStyle] = useState('AUTO');
+  const [aiCount, setAiCount] = useState(3);
+  const [aiImages, setAiImages] = useState([]);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [bgImageUrl, setBgImageUrl] = useState(null);
+
+  useEffect(() => {
+    if (activeCampaign) {
+      setThumbText(activeCampaign.name || thumbText);
+      setThumbSubtext(activeCampaign.topic || thumbSubtext);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCampaign?.id]);
+
+  const aspectMap = {youtube:'16x9', ig:'1x1', tt:'9x16', fb:'16x9', li:'16x9'};
+
+  const generateAi = async (forCard = false) => {
+    const platformAspect = aspectMap[platformPreview] || '16x9';
+    const sb = window.SupabaseClient;
+    const promptText = (aiPrompt || `Cinematic thumbnail for "${thumbText}". ${thumbSubtext}. Bold, eye-catching, high contrast. Aspect ${platformAspect}.`).slice(0, 700);
+    setAiBusy(true);
+    try {
+      const r = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          prompt: promptText,
+          count: forCard ? Math.max(1, Math.min(8, parseInt(aiCount) || 3)) : 1,
+          aspect: platformAspect,
+          style: aiStyle,
+          model: 'V_3',
+          kind: 'thumbnail',
+          related_id: activeCampaign?.id || null,
+          workspace_id: sb?.getWorkspaceId?.() || null,
+          supabase_url: localStorage.getItem('eos-sb-url'),
+          supabase_key: localStorage.getItem('eos-sb-key'),
+        })
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Image gen failed: ' + (data.error || 'unknown'), 'error');
+      } else {
+        const urls = (data.images || []).filter(i => i.url);
+        if (urls.length === 0) {
+          addToast('Ideogram returned no images', 'error');
+        } else {
+          setAiImages(prev => [...urls, ...prev].slice(0, 24));
+          setBgImageUrl(urls[0].url);
+          addToast(`${urls.length} thumbnail${urls.length>1?'s':''} generated`, 'success');
+        }
+      }
+    } catch (e) {
+      addToast('Image request error: ' + e.message, 'error');
+    }
+    setAiBusy(false);
+  };
+
+  const exportThumbnail = async () => {
+    addToast('Export ready — right-click the preview to save as PNG', 'info');
+  };
 
   const platformSizes = {
     youtube:{w:1280,h:720,label:'YouTube (1280x720)',ratio:'16:9'},
@@ -3939,10 +4015,13 @@ function ThumbnailStudioView() {
   return (
     <div className="view-enter">
       <div className="view-head">
-        <div><h1>Thumbnail Studio</h1><div className="sub">Design, preview, and A/B test thumbnails with AI generation.</div></div>
+        <div>
+          <h1>Thumbnail Studio</h1>
+          <div className="sub">Design, preview, and A/B test thumbnails. <span style={{color:'var(--yellow)',fontFamily:'var(--mono)',fontSize:'.72rem'}}>● POWERED BY IDEOGRAM</span></div>
+        </div>
         <div style={{display:'flex',gap:'.5rem'}}>
-          <button className="btn btn-ghost btn-sm" onClick={() => addToast('3 variants generated with Ideogram!','success')}>{Icons.sparkle} AI Generate</button>
-          <button className="btn btn-primary btn-sm" onClick={() => addToast('Thumbnail exported at ' + currentSize.label,'success')}>{Icons.download} Export</button>
+          <button className="btn btn-ghost btn-sm" disabled={aiBusy} onClick={() => generateAi(true)}>{Icons.sparkle} {aiBusy ? 'Generating…' : 'AI Generate'}</button>
+          <button className="btn btn-primary btn-sm" onClick={exportThumbnail}>{Icons.download} Export</button>
         </div>
       </div>
 
@@ -3951,7 +4030,7 @@ function ThumbnailStudioView() {
         <div>
           {/* LIVE PREVIEW */}
           <div className="card" style={{marginBottom:'1rem',padding:0,overflow:'hidden'}}>
-            <div style={{aspectRatio:currentSize.w+'/'+currentSize.h,maxHeight:420,background:bgColor,position:'relative',display:'flex',overflow:'hidden'}}>
+            <div style={{aspectRatio:currentSize.w+'/'+currentSize.h,maxHeight:420,background:bgImageUrl?`url(${bgImageUrl}) center/cover`:bgColor,position:'relative',display:'flex',overflow:'hidden'}}>
               {/* Template layout */}
               {selectedTemplate.layout === 'split' && (
                 <>
@@ -4078,11 +4157,53 @@ function ThumbnailStudioView() {
             </div>
           </div>
 
-          {/* IDEOGRAM */}
-          <div className="card" style={{borderColor:'rgba(255,214,10,0.2)'}}>
+          {/* IDEOGRAM — REAL */}
+          <div className="card" style={{borderColor:'var(--yellow-glow-strong)'}}>
             <div className="card-head"><h3 style={{display:'flex',alignItems:'center',gap:'.5rem'}}>{Icons.sparkle} AI Generation</h3></div>
-            <div style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:'1rem',lineHeight:1.5}}>Generate a complete thumbnail using Ideogram AI from your topic and hook text.</div>
-            <button className="btn btn-primary" style={{width:'100%'}} onClick={() => addToast('Generating 3 AI thumbnails with Ideogram V2...','info')}>Generate with Ideogram</button>
+            <div style={{fontSize:'.78rem',color:'var(--text-muted)',marginBottom:'.75rem',lineHeight:1.5}}>Generates real Ideogram V3 images sized for {currentSize.label}. Auto-fills the preview background.</div>
+
+            <label className="field"><span className="lbl">Visual Prompt (optional — auto-built from text)</span>
+              <textarea className="input" rows={3} placeholder={`Cinematic thumbnail for "${thumbText}"`} value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{fontFamily:'var(--mono)',fontSize:'.78rem'}}/>
+            </label>
+
+            <div style={{display:'flex',gap:'.4rem',marginBottom:'.6rem'}}>
+              <select className="input" value={aiStyle} onChange={e => setAiStyle(e.target.value)} style={{flex:2}}>
+                <option value="AUTO">Style: Auto</option>
+                <option value="GENERAL">General</option>
+                <option value="REALISTIC">Realistic</option>
+                <option value="DESIGN">Design</option>
+                <option value="RENDER_3D">3D Render</option>
+                <option value="ANIME">Anime</option>
+              </select>
+              <select className="input" value={aiCount} onChange={e => setAiCount(parseInt(e.target.value))} style={{flex:1}}>
+                <option value={1}>1 image</option>
+                <option value={3}>3 images</option>
+                <option value={5}>5 images</option>
+                <option value={8}>8 images</option>
+              </select>
+            </div>
+
+            <button className="btn btn-primary" style={{width:'100%'}} disabled={aiBusy} onClick={() => generateAi(true)}>
+              {aiBusy ? '⚡ Generating…' : `Generate ${aiCount} with Ideogram`}
+            </button>
+
+            {aiImages.length > 0 && (
+              <div style={{marginTop:'.85rem'}}>
+                <div style={{fontSize:'.65rem',fontFamily:'var(--mono)',color:'var(--text-dim)',textTransform:'uppercase',marginBottom:'.4rem'}}>Recent Generations · click to apply</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'.35rem'}}>
+                  {aiImages.slice(0,12).map((im, i) => (
+                    <div key={i} onClick={() => {setBgImageUrl(im.url); addToast('Applied to preview','success');}}
+                      style={{aspectRatio:'1/1',background:`url(${im.url}) center/cover`,borderRadius:6,cursor:'pointer',border: bgImageUrl===im.url ? '2px solid var(--yellow)':'1px solid var(--border)',transition:'transform .1s'}}
+                      title={im.prompt}/>
+                  ))}
+                </div>
+                <button className="btn btn-ghost btn-sm" style={{width:'100%',marginTop:'.4rem'}} onClick={() => {setBgImageUrl(null); addToast('Cleared AI background','info');}}>Clear AI Background</button>
+              </div>
+            )}
+
+            <div style={{marginTop:'.85rem',padding:'.5rem',background:'var(--glass)',borderRadius:6,fontSize:'.65rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+              Requires IDEOGRAM_API_KEY in Vercel env
+            </div>
           </div>
         </div>
       </div>
@@ -6026,6 +6147,176 @@ function StrategyVaultDrawer() {
 }
 
 /* ============================================================
+   SCRIPT EDITOR — textarea with Claude rewrite toolbar
+   Used in EditorView, ScreenRecordView, and any place a script needs
+   in-place editing. Selects-or-all behavior: if user has highlighted
+   text, only that span gets rewritten; otherwise the whole script.
+   ============================================================ */
+const REWRITE_PRESETS = [
+  {key:'punchier',         label:'⚡ Punchier'},
+  {key:'shorter',          label:'✂️ Shorter'},
+  {key:'longer',           label:'📏 Longer'},
+  {key:'hook',             label:'🎣 5 Hook Variants'},
+  {key:'cta',              label:'📣 5 CTA Variants'},
+  {key:'contrarian',       label:'🔄 Contrarian'},
+  {key:'story',            label:'📖 Story Arc'},
+  {key:'teleprompter',     label:'🎙️ Teleprompter Read'},
+  {key:'brain_score_fix',  label:'🧠 Boost Brain Score'},
+  {key:'fix_grammar',      label:'✓ Fix Grammar'},
+  {key:'remove_jargon',    label:'🧼 Plain English'},
+  {key:'add_proof',        label:'🔬 Add Proof'},
+];
+const PLATFORM_REWRITES = [
+  {key:'ig_caption',     label:'IG Caption'},
+  {key:'tt_caption',     label:'TikTok Caption'},
+  {key:'yt_description', label:'YT Description'},
+  {key:'li_post',        label:'LinkedIn Post'},
+  {key:'fb_post',        label:'Facebook Post'},
+];
+const TRANSLATE_LANGS = ['Spanish','Portuguese','French','German','Italian','Japanese','Chinese (Simplified)','Arabic','Hindi','Korean'];
+
+function ScriptEditor({value, onChange, label='Script', minRows=8, relatedId=null}) {
+  const {addToast} = useApp();
+  const taRef = useRef(null);
+  const [busy, setBusy] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [showTranslate, setShowTranslate] = useState(false);
+
+  const getSelection = () => {
+    const ta = taRef.current; if (!ta) return {start:0, end:0, selected:''};
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    return {start, end, selected: value.slice(start, end)};
+  };
+
+  const applyResult = (newText, sel) => {
+    setHistory(h => [{prev: value, at: Date.now()}, ...h].slice(0, 8));
+    if (sel && sel.selected) {
+      onChange(value.slice(0, sel.start) + newText + value.slice(sel.end));
+    } else {
+      onChange(newText);
+    }
+  };
+
+  const callEdit = async (body, busyKey) => {
+    if (!value || !value.trim()) { addToast('Nothing to edit', 'error'); return; }
+    setBusy(busyKey);
+    const sb = window.SupabaseClient;
+    const sel = getSelection();
+    const inputText = sel.selected || value;
+    try {
+      const r = await fetch('/api/edit-script', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({...body, text: inputText})
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Rewrite failed: ' + (data.error || 'unknown'), 'error');
+      } else {
+        applyResult(data.result, sel);
+        addToast(sel.selected ? 'Selection rewritten' : 'Script rewritten', 'success');
+        // best-effort log
+        if (sb && sb.isReady() && relatedId) {
+          sb.insert('script_edits', {
+            workspace_id: sb.getWorkspaceId(),
+            related_id: relatedId,
+            preset: body.preset || null,
+            instruction: body.instruction || null,
+            input_text: inputText,
+            output_text: data.result,
+            model: data.model,
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      addToast('Edit request error: ' + e.message, 'error');
+    }
+    setBusy(null);
+  };
+
+  const undo = () => {
+    if (!history.length) { addToast('Nothing to undo', 'info'); return; }
+    const [last, ...rest] = history;
+    onChange(last.prev);
+    setHistory(rest);
+    addToast('Undone', 'info');
+  };
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.5rem'}}>
+        <div style={{fontSize:'.78rem',fontWeight:700,color:'var(--text-muted)'}}>{label}</div>
+        <div style={{display:'flex',gap:'.35rem',alignItems:'center'}}>
+          <span style={{fontSize:'.6rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{value ? value.split(/\s+/).filter(Boolean).length : 0} words · ~{Math.ceil((value||'').split(/\s+/).filter(Boolean).length / 2.6)}s read</span>
+          {history.length > 0 && <button className="btn btn-ghost btn-sm" onClick={undo} title="Undo last rewrite">↶ Undo</button>}
+        </div>
+      </div>
+
+      <div style={{display:'flex',flexWrap:'wrap',gap:'.3rem',marginBottom:'.5rem',padding:'.5rem',background:'var(--glass)',borderRadius:8,border:'1px solid var(--border)'}}>
+        <span style={{fontSize:'.6rem',fontFamily:'var(--mono)',color:'var(--yellow)',textTransform:'uppercase',letterSpacing:'.06em',padding:'.2rem .35rem',marginRight:'.25rem'}}>⚡ Claude</span>
+        {REWRITE_PRESETS.map(p => (
+          <button key={p.key} disabled={!!busy} onClick={() => callEdit({preset: p.key}, p.key)}
+            style={{padding:'.25rem .55rem',background: busy === p.key ? 'var(--yellow)' : 'var(--bg-elev)',color: busy === p.key ? '#0A0A14' : 'var(--text)',border:'1px solid var(--border)',borderRadius:5,fontSize:'.7rem',cursor:'pointer',whiteSpace:'nowrap'}}>
+            {busy === p.key ? '…' : p.label}
+          </button>
+        ))}
+        <button onClick={() => setShowTranslate(s => !s)} style={{padding:'.25rem .55rem',background:'var(--bg-elev)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:5,fontSize:'.7rem',cursor:'pointer'}}>🌍 Translate ▾</button>
+      </div>
+
+      {showTranslate && (
+        <div style={{padding:'.5rem',background:'var(--glass)',borderRadius:8,border:'1px solid var(--border)',marginBottom:'.5rem',display:'flex',flexWrap:'wrap',gap:'.3rem'}}>
+          {TRANSLATE_LANGS.map(lang => (
+            <button key={lang} disabled={!!busy} onClick={() => {callEdit({translate_to: lang}, 'tr-'+lang); setShowTranslate(false);}}
+              style={{padding:'.25rem .55rem',background: busy === 'tr-'+lang ? 'var(--yellow)' : 'var(--bg-elev)',color: busy === 'tr-'+lang ? '#0A0A14' : 'var(--text)',border:'1px solid var(--border)',borderRadius:5,fontSize:'.7rem',cursor:'pointer'}}>
+              {busy === 'tr-'+lang ? '…' : lang}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{display:'flex',flexWrap:'wrap',gap:'.3rem',marginBottom:'.5rem'}}>
+        <span style={{fontSize:'.6rem',fontFamily:'var(--mono)',color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.06em',padding:'.2rem .35rem',marginRight:'.25rem'}}>Repurpose →</span>
+        {PLATFORM_REWRITES.map(p => (
+          <button key={p.key} disabled={!!busy} onClick={() => callEdit({preset: p.key}, p.key)}
+            style={{padding:'.25rem .55rem',background: busy === p.key ? 'var(--blue)' : 'var(--bg-elev)',color: busy === p.key ? '#fff' : 'var(--text-muted)',border:'1px solid var(--border)',borderRadius:5,fontSize:'.68rem',cursor:'pointer'}}>
+            {busy === p.key ? '…' : p.label}
+          </button>
+        ))}
+      </div>
+
+      <textarea ref={taRef} className="input" rows={minRows} value={value} onChange={e => onChange(e.target.value)}
+        placeholder="Paste or type your script. Highlight any portion to rewrite just that span."
+        style={{fontFamily:'var(--mono)',fontSize:'.82rem',lineHeight:1.6,minHeight:200}}/>
+
+      <div style={{fontSize:'.65rem',color:'var(--text-dim)',marginTop:'.4rem',fontFamily:'var(--mono)'}}>
+        💡 Highlight text first to rewrite just that portion. Otherwise the whole script is rewritten.
+      </div>
+    </div>
+  );
+}
+
+function ScriptEditorCard() {
+  const {latestStrategy, activeCampaign} = useApp();
+  const [script, setScript] = useState(() => {
+    if (latestStrategy?.output) return latestStrategy.output;
+    return TELEPROMPTER_SCRIPT.join('\n\n');
+  });
+
+  useEffect(() => {
+    if (latestStrategy?.output) setScript(latestStrategy.output);
+  }, [latestStrategy?.id]);
+
+  return (
+    <div className="card" style={{marginBottom:'1rem',borderColor:'var(--yellow-glow-strong)'}}>
+      <div className="card-head">
+        <h3 style={{display:'flex',alignItems:'center',gap:'.5rem'}}>{Icons.sparkle} Script Editor <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'rgba(255,214,10,0.12)',color:'var(--yellow)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>POWERED BY CLAUDE</span></h3>
+      </div>
+      <ScriptEditor value={script} onChange={setScript} label="Live Script" minRows={10} relatedId={activeCampaign?.id || latestStrategy?.id || null}/>
+    </div>
+  );
+}
+
+/* ============================================================
    WORKFLOWS — automation recipes that chain multiple steps
    ============================================================ */
 const WORKFLOW_TEMPLATES = [
@@ -6322,6 +6613,7 @@ function BlogBuilderView() {
   const [activeTab, setActiveTab] = useState('preview');
   const [recentPosts, setRecentPosts] = useState([]);
   const [publishingTo, setPublishingTo] = useState(null);
+  const [generatingImages, setGeneratingImages] = useState(false);
   const [connections, setConnections] = useState(() => {
     try { return JSON.parse(localStorage.getItem('eos-blog-connections') || '{}'); } catch { return {}; }
   });
@@ -6448,6 +6740,58 @@ function BlogBuilderView() {
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const generateImages = async () => {
+    if (!result || !result.meta?.image_prompts?.length) {
+      addToast('No image prompts in this post', 'info'); return;
+    }
+    setGeneratingImages(true);
+    const sb = window.SupabaseClient;
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+    const newImages = [];
+    let html = result.html;
+    let markdown = result.markdown;
+
+    for (let i = 0; i < result.meta.image_prompts.length; i++) {
+      const prompt = result.meta.image_prompts[i];
+      try {
+        const r = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            prompt, count: 1, aspect: '16x9', style: 'AUTO', model: 'V_3',
+            kind: 'blog', related_id: result.id || null,
+            workspace_id: sb?.getWorkspaceId?.() || null,
+            supabase_url: sbUrl, supabase_key: sbKey,
+          })
+        });
+        const data = await r.json();
+        const url = data?.images?.[0]?.url;
+        if (url) {
+          const placeholder = `image-${i + 1}-placeholder`;
+          html = html.split(placeholder).join(url);
+          markdown = markdown.split(placeholder).join(url);
+          newImages.push(url);
+        }
+      } catch (e) {
+        console.warn('image gen failed:', e.message);
+      }
+    }
+
+    if (newImages.length === 0) {
+      addToast('No images generated — check IDEOGRAM_API_KEY', 'error');
+    } else {
+      const updatedMeta = {...result.meta, generated_image_urls: newImages};
+      setResult({...result, html, markdown, meta: updatedMeta});
+      // patch blog_posts row
+      if (result.id && sb && sb.isReady()) {
+        await sb.update('blog_posts', result.id, {html, markdown, meta: updatedMeta});
+      }
+      addToast(`${newImages.length} image${newImages.length>1?'s':''} added to post`, 'success');
+    }
+    setGeneratingImages(false);
   };
 
   return (
@@ -6594,6 +6938,13 @@ function BlogBuilderView() {
                 {activeTab === 'meta' && <pre style={{fontFamily:'var(--mono)',fontSize:'.72rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{JSON.stringify(result.meta, null, 2)}</pre>}
               </div>
 
+              {(result.meta?.image_prompts?.length > 0) && !result.meta?.generated_image_urls?.length && (
+                <div style={{padding:'.6rem .8rem',background:'rgba(255,214,10,0.06)',border:'1px solid var(--yellow-glow)',borderRadius:8,marginBottom:'.75rem',display:'flex',alignItems:'center',gap:'.6rem'}}>
+                  <span style={{fontSize:'1.1rem'}}>🖼️</span>
+                  <span style={{flex:1,fontSize:'.82rem'}}>{result.meta.image_prompts.length} image prompt{result.meta.image_prompts.length>1?'s':''} ready — generate real images via Ideogram?</span>
+                  <button className="btn btn-primary btn-sm" disabled={generatingImages} onClick={generateImages}>{generatingImages ? '⚡ Generating…' : 'Generate Images'}</button>
+                </div>
+              )}
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'.5rem'}}>
                 <button className="btn btn-ghost btn-sm" onClick={() => copyToClipboard(result.html, 'HTML')}>🔗 Copy HTML</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => copyToClipboard(result.markdown, 'Markdown')}>📝 Copy MD</button>
@@ -6615,23 +6966,28 @@ function BlogBuilderView() {
    LEGAL — Terms of Service + Privacy Policy (A2P / SMS / Email compliant)
    ============================================================ */
 function LegalView() {
-  const [tab, setTab] = useState('terms');
+  const {legalTab, setLegalTab} = useApp();
+  const tab = legalTab || 'terms';
   return (
     <div className="view-enter">
       <div className="view-head">
         <div><h1>Terms & Privacy</h1><div className="sub">Compliance basis for our SMS (A2P 10DLC) and email (CAN-SPAM, CASL, GDPR) campaigns.</div></div>
       </div>
       <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',flexWrap:'wrap'}}>
-        <button className={`btn btn-sm ${tab==='terms'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('terms')}>Terms of Service</button>
-        <button className={`btn btn-sm ${tab==='privacy'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('privacy')}>Privacy Policy</button>
-        <button className={`btn btn-sm ${tab==='sms'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('sms')}>SMS Terms (A2P 10DLC)</button>
-        <button className={`btn btn-sm ${tab==='email'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('email')}>Email Terms</button>
+        <button className={`btn btn-sm ${tab==='terms'?'btn-primary':'btn-ghost'}`} onClick={() => setLegalTab('terms')}>Terms of Service</button>
+        <button className={`btn btn-sm ${tab==='privacy'?'btn-primary':'btn-ghost'}`} onClick={() => setLegalTab('privacy')}>Privacy Policy</button>
+        <button className={`btn btn-sm ${tab==='sms'?'btn-primary':'btn-ghost'}`} onClick={() => setLegalTab('sms')}>SMS Terms (A2P 10DLC)</button>
+        <button className={`btn btn-sm ${tab==='email'?'btn-primary':'btn-ghost'}`} onClick={() => setLegalTab('email')}>Email Terms</button>
+        <button className="btn btn-ghost btn-sm" style={{marginLeft:'auto'}} onClick={() => navigator.clipboard.writeText(window.location.origin + '/?view=' + tab).then(() => alert('Public URL copied'))}>🔗 Copy Public Link</button>
       </div>
       <div className="card" style={{maxWidth:900,padding:'2rem',lineHeight:1.7}}>
         {tab === 'terms' && <TermsOfService />}
         {tab === 'privacy' && <PrivacyPolicy />}
         {tab === 'sms' && <SmsTerms />}
         {tab === 'email' && <EmailTerms />}
+        <div style={{marginTop:'2rem',padding:'1rem',background:'var(--glass)',borderRadius:8,fontSize:'.78rem',color:'var(--text-dim)',textAlign:'center'}}>
+          Last updated: {EFFECTIVE_DATE} · Questions: <a href={`mailto:${LEGAL_EMAIL}`} style={{color:'var(--yellow)'}}>{LEGAL_EMAIL}</a>
+        </div>
       </div>
     </div>
   );
@@ -6726,6 +7082,7 @@ function PrivacyPolicy() {
 }
 
 function SmsTerms() {
+  const {goToLegal} = useApp();
   return (
     <div>
       <h2>SMS Terms (A2P 10DLC)</h2>
@@ -6741,7 +7098,7 @@ function SmsTerms() {
       <h3>5. Mobile Information Sharing</h3>
       <p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.</strong> Information sharing to subcontractors in support categories (delivery, fraud prevention) is permitted; all other use case categories exclude text-messaging originator opt-in data and consent.</p>
       <h3>6. Privacy</h3>
-      <p>Use of mobile data is governed by our <a href="?view=privacy">Privacy Policy</a>.</p>
+      <p>Use of mobile data is governed by our <a href="?view=privacy" onClick={(e) => {e.preventDefault(); goToLegal('privacy');}} style={{color:'var(--yellow)'}}>Privacy Policy</a>.</p>
       <h3>7. Disputes</h3>
       <p>{LEGAL_EMAIL}</p>
     </div>
@@ -7097,7 +7454,7 @@ function LeadMagnetView({magnetId}) {
    ROOT APP
    ============================================================ */
 function App() {
-  const {view, setView} = useApp();
+  const {view, setView, setLegalTab} = useApp();
   // Route handling on first load: ?magnet=, ?view=, ?unsubscribe=
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const magnetId = urlParams?.get('magnet');
@@ -7106,6 +7463,9 @@ function App() {
 
   useEffect(() => {
     if (queryView && ['terms','privacy','sms','email'].includes(queryView)) {
+      setLegalTab(queryView);
+      setView('legal');
+    } else if (queryView === 'legal') {
       setView('legal');
     } else if (queryView && ['workflows','blog','dashboard','create','pricing'].includes(queryView)) {
       setView(queryView);

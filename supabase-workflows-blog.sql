@@ -102,6 +102,36 @@ CREATE INDEX IF NOT EXISTS campaigns_workspace_idx ON campaigns(workspace_id, up
 ALTER TABLE content ADD COLUMN IF NOT EXISTS campaign_id uuid;
 CREATE INDEX IF NOT EXISTS content_campaign_idx ON content(campaign_id);
 
+-- generated_images: Ideogram (and future provider) outputs cached for re-use
+CREATE TABLE IF NOT EXISTS generated_images (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid,
+  kind text NOT NULL DEFAULT 'generic',
+  related_id uuid,
+  prompt text NOT NULL,
+  url text NOT NULL,
+  model text,
+  aspect text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS generated_images_workspace_idx ON generated_images(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS generated_images_related_idx ON generated_images(related_id);
+
+-- script_edits: log every Claude rewrite for undo + audit
+CREATE TABLE IF NOT EXISTS script_edits (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid,
+  related_id uuid,
+  preset text,
+  instruction text,
+  input_text text NOT NULL,
+  output_text text NOT NULL,
+  model text,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS script_edits_related_idx ON script_edits(related_id, created_at DESC);
+
 -- ============================================================
 -- Permissive demo policies (matches existing supabase-rls-demo.sql pattern).
 -- Tighten before opening to multi-tenant production traffic.
@@ -129,3 +159,11 @@ CREATE POLICY consent_log_all ON consent_log FOR ALL USING (true) WITH CHECK (tr
 ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS campaigns_all ON campaigns;
 CREATE POLICY campaigns_all ON campaigns FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE generated_images ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS generated_images_all ON generated_images;
+CREATE POLICY generated_images_all ON generated_images FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE script_edits ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS script_edits_all ON script_edits;
+CREATE POLICY script_edits_all ON script_edits FOR ALL USING (true) WITH CHECK (true);
