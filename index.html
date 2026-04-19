@@ -2864,33 +2864,176 @@ function TranslateView() {
    PUBLISH VIEW
    ============================================================ */
 function PublishView() {
-  const {addToast} = useApp();
+  const {addToast, setVaultOpen, setVaultLoadHandler} = useApp();
   const [month, setMonth] = useState(2);
   const [selectedDay, setSelectedDay] = useState(null);
   const [platforms, setPlatforms] = useState({ig:true,tt:true,yt:true,li:true,fb:true,em:true});
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const daysInMonth = [31,29,31,30,31,30,31,31,30,31,30,31];
   const firstDayOffset = [3,6,0,3,5,1,3,6,2,4,0,2];
-  const scheduledDays = {3:'Carousel',5:'YouTube',8:'Reel',10:'Clips',12:'Newsletter',15:'Reel',18:'Carousel',20:'YouTube',22:'Clips',25:'Reel',28:'Lead Magnet'};
+  const [folders, setFolders] = useState([
+    {id:'inbox', name:'Inbox', color:'var(--text-dim)', count:0},
+    {id:'q1-launch', name:'Q1 Launch Sprint', color:'var(--yellow)', count:8},
+    {id:'evergreen', name:'Evergreen Library', color:'var(--green)', count:23},
+    {id:'collabs', name:'Collaborator Drops', color:'var(--blue)', count:12},
+    {id:'archive', name:'Archive', color:'var(--text-dim)', count:47},
+  ]);
+  const [activeFolder, setActiveFolder] = useState('q1-launch');
+  const [showFolderModal, setShowFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [editingPost, setEditingPost] = useState(null);
+  const [postCaption, setPostCaption] = useState('');
+  const [postHashtags, setPostHashtags] = useState('');
+  const [postMentions, setPostMentions] = useState('');
+  const [postPlatforms, setPostPlatforms] = useState({ig:true});
+
   const days = daysInMonth[month];
   const offset = firstDayOffset[month];
+  const scheduledDays = {3:'Carousel',5:'YouTube',8:'Reel',10:'Clips',12:'Newsletter',15:'Reel',18:'Carousel',20:'YouTube',22:'Clips',25:'Reel',28:'Lead Magnet'};
+
+  // Register vault load handler so "Import from Vault" works in this view
+  useEffect(() => {
+    setVaultLoadHandler(() => (text) => {
+      // Parse the loaded section text into caption + hashtags
+      const lines = text.split('\n');
+      const hashtagLine = lines.find(l => l.includes('#'));
+      const captionLines = lines.filter(l => !l.match(/^[A-Z\s]+:$/));
+      setPostCaption(captionLines.join('\n').trim());
+      if (hashtagLine) {
+        setPostHashtags(hashtagLine.match(/#\w+/g)?.join(' ') || '');
+      }
+      // Look for @ mentions
+      const mentions = text.match(/@\w+/g);
+      if (mentions) setPostMentions(mentions.join(' '));
+      addToast('Imported from Strategy Vault — review caption + hashtags','success');
+      setEditingPost({day: selectedDay || 18, platform: 'ig', isNew: !editingPost});
+    });
+    return () => setVaultLoadHandler(null);
+  }, [selectedDay]);
+
+  const createFolder = () => {
+    if (!newFolderName.trim()) return;
+    const id = newFolderName.toLowerCase().replace(/[^a-z0-9]+/g,'-');
+    setFolders(prev => [...prev, {id, name: newFolderName, color: 'var(--magenta)', count: 0}]);
+    setActiveFolder(id);
+    setNewFolderName('');
+    setShowFolderModal(false);
+    addToast(`Folder "${newFolderName}" created`,'success');
+  };
+
+  const importFromVault = () => {
+    setVaultOpen(true);
+    addToast('Pick a strategy section to import','info');
+  };
 
   return (
     <div className="view-enter">
+      {/* NEW FOLDER MODAL */}
+      {showFolderModal && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',backdropFilter:'blur(8px)',zIndex:200,display:'grid',placeItems:'start center',paddingTop:'15vh'}} onClick={() => setShowFolderModal(false)}>
+          <div style={{width:'min(440px,90vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:'var(--radius-xl)',padding:'1.5rem',boxShadow:'0 20px 60px rgba(0,0,0,.5)'}} onClick={e => e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem'}}>
+              <h3 style={{fontFamily:'var(--display)',fontSize:'1.2rem'}}>📁 New Campaign Folder</h3>
+              <button className="icon-btn" onClick={() => setShowFolderModal(false)} style={{width:28,height:28}}>{Icons.x}</button>
+            </div>
+            <label className="field">
+              <span className="lbl">Folder Name</span>
+              <input className="input" autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createFolder()} placeholder="e.g., Black Friday Campaign" />
+            </label>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-primary" style={{flex:1}} onClick={createFolder} disabled={!newFolderName.trim()}>Create</button>
+              <button className="btn btn-ghost" onClick={() => setShowFolderModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POST COMPOSER MODAL */}
+      {editingPost && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',backdropFilter:'blur(8px)',zIndex:200,display:'grid',placeItems:'start center',paddingTop:'8vh'}} onClick={() => setEditingPost(null)}>
+          <div style={{width:'min(640px,95vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:'var(--radius-xl)',padding:'1.5rem',boxShadow:'0 20px 60px rgba(0,0,0,.5)',maxHeight:'85vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.25rem'}}>
+              <h3 style={{fontFamily:'var(--display)',fontSize:'1.2rem'}}>{editingPost.isNew ? '+ Compose Post' : 'Edit Scheduled Post'}</h3>
+              <button className="icon-btn" onClick={() => setEditingPost(null)} style={{width:28,height:28}}>{Icons.x}</button>
+            </div>
+
+            <div style={{padding:'.6rem .85rem',background:'rgba(255,214,10,0.08)',border:'1px solid rgba(255,214,10,0.25)',borderRadius:'var(--radius-lg)',marginBottom:'1rem',display:'flex',alignItems:'center',gap:'.5rem'}}>
+              <span style={{fontSize:'.78rem',flex:1}}>📚 Pull caption + hashtags from a saved strategy</span>
+              <button className="btn btn-primary btn-sm" onClick={importFromVault} style={{fontSize:'.7rem',padding:'.3rem .65rem'}}>Import from Vault</button>
+            </div>
+
+            <label className="field">
+              <span className="lbl">Caption</span>
+              <textarea className="input" value={postCaption} onChange={e => setPostCaption(e.target.value)} placeholder="Write or import from Strategy Vault..." style={{minHeight:140,resize:'vertical',fontFamily:'var(--body)'}} />
+              <div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)',marginTop:'.25rem'}}>{postCaption.length} chars</div>
+            </label>
+
+            <label className="field">
+              <span className="lbl">Hashtags</span>
+              <textarea className="input" value={postHashtags} onChange={e => setPostHashtags(e.target.value)} placeholder="#aiautomation #aibusiness #contentcreator..." style={{minHeight:60,resize:'vertical',fontFamily:'var(--body)'}} />
+              <div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)',marginTop:'.25rem'}}>{(postHashtags.match(/#\w+/g)||[]).length} hashtags</div>
+            </label>
+
+            <label className="field">
+              <span className="lbl">Mentions / Tags</span>
+              <input className="input" value={postMentions} onChange={e => setPostMentions(e.target.value)} placeholder="@LaminSNgobeh @collaborator" />
+            </label>
+
+            <label className="field">
+              <span className="lbl">Folder</span>
+              <select className="input" value={activeFolder} onChange={e => setActiveFolder(e.target.value)}>
+                {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </label>
+
+            <div style={{marginBottom:'1rem'}}>
+              <span className="lbl" style={{display:'block',fontFamily:'var(--mono)',fontSize:'.7rem',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:'.4rem',fontWeight:600}}>Post To</span>
+              <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
+                {[{k:'ig',l:'Instagram'},{k:'tt',l:'TikTok'},{k:'yt',l:'YouTube'},{k:'li',l:'LinkedIn'},{k:'fb',l:'Facebook'}].map(p => (
+                  <button key={p.k} className={`platform-badge ${p.k}`} style={{padding:'.4rem .8rem',fontSize:'.72rem',cursor:'pointer',opacity:postPlatforms[p.k]?1:.4}} onClick={() => setPostPlatforms(prev => ({...prev, [p.k]: !prev[p.k]}))}>{p.l}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-primary" style={{flex:1}} onClick={() => {addToast('Post scheduled to '+folders.find(f=>f.id===activeFolder)?.name,'success'); setEditingPost(null); setPostCaption(''); setPostHashtags(''); setPostMentions('');}}>Schedule Post</button>
+              <button className="btn btn-ghost" onClick={() => setEditingPost(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="view-head">
-        <div><h1>Publish</h1><div className="sub">Schedule and deploy content across 5 platforms over 14 days.</div></div>
-        <button className="btn btn-primary" onClick={() => addToast('Auto-scheduled!','success')}>Quick Schedule</button>
+        <div><h1>Publish</h1><div className="sub">Folders, campaigns, and scheduled posts. Import copy directly from Strategy Vault.</div></div>
+        <div style={{display:'flex',gap:'.5rem'}}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setVaultOpen(true)}>📚 Vault</button>
+          <button className="btn btn-primary" onClick={() => setEditingPost({day: selectedDay, isNew: true})}>+ New Post</button>
+        </div>
       </div>
+
+      {/* FOLDER TABS */}
+      <div style={{display:'flex',gap:'.4rem',marginBottom:'1.25rem',flexWrap:'wrap',alignItems:'center'}}>
+        {folders.map(f => (
+          <button key={f.id} className={`btn btn-sm ${activeFolder===f.id?'btn-primary':'btn-ghost'}`} onClick={() => setActiveFolder(f.id)} style={{fontSize:'.78rem'}}>
+            <span style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:f.color,marginRight:'.4rem'}}></span>
+            {f.name} <span style={{fontFamily:'var(--mono)',fontSize:'.65rem',opacity:.7,marginLeft:'.35rem'}}>{f.count}</span>
+          </button>
+        ))}
+        <button className="btn btn-ghost btn-sm" style={{borderStyle:'dashed',fontSize:'.78rem'}} onClick={() => setShowFolderModal(true)}>+ New Folder</button>
+      </div>
+
+      {/* PLATFORM TOGGLES */}
       <div style={{display:'flex',gap:'.5rem',marginBottom:'1.5rem',flexWrap:'wrap'}}>
         {[{key:'ig',label:'Instagram',cls:'ig'},{key:'tt',label:'TikTok',cls:'tt'},{key:'yt',label:'YouTube',cls:'yt'},{key:'li',label:'LinkedIn',cls:'li'},{key:'fb',label:'Facebook',cls:'fb'},{key:'em',label:'Email',cls:'em'}].map(p => (
           <button key={p.key} className={`platform-badge ${p.cls}`} style={{padding:'.5rem 1rem',fontSize:'.78rem',cursor:'pointer',opacity:platforms[p.key]?1:.35,transition:'opacity var(--transition)'}} onClick={() => setPlatforms(prev => ({...prev, [p.key]: !prev[p.key]}))}>{p.label}</button>
         ))}
       </div>
+
       <div className="grid-2" style={{gridTemplateColumns:'1fr 340px'}}>
         <div className="card">
           <div className="card-head">
             <button className="icon-btn" onClick={() => setMonth(m => Math.max(0,m-1))} style={{width:28,height:28}}>{Icons.chevLeft}</button>
-            <h3>{monthNames[month]} 2052</h3>
+            <h3>{monthNames[month]} 2052 <span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)',marginLeft:'.5rem',fontWeight:400}}>· {folders.find(f=>f.id===activeFolder)?.name}</span></h3>
             <button className="icon-btn" onClick={() => setMonth(m => Math.min(11,m+1))} style={{width:28,height:28}}>{Icons.chevRight}</button>
           </div>
           <div className="cal-head">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => <div key={d}>{d}</div>)}</div>
@@ -2916,12 +3059,20 @@ function PublishView() {
               <div>
                 <div style={{padding:'.75rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.75rem',border:'1px solid var(--border)'}}>
                   <div style={{fontWeight:700,marginBottom:'.25rem'}}>{scheduledDays[selectedDay]}</div>
-                  <div style={{fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-dim)'}}>09:00 AM EST</div>
+                  <div style={{fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-dim)'}}>09:00 AM EST · {folders.find(f=>f.id===activeFolder)?.name}</div>
                 </div>
-                <button className="btn btn-ghost btn-sm" style={{width:'100%'}}>Edit Schedule</button>
+                <div style={{display:'flex',gap:'.4rem'}}>
+                  <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={() => setEditingPost({day:selectedDay, platform:'ig'})}>Edit Post</button>
+                  <button className="btn btn-ghost btn-sm" onClick={importFromVault}>📚</button>
+                </div>
               </div>
             ) : (
-              <div style={{textAlign:'center',padding:'2rem 0',color:'var(--text-dim)'}}>{selectedDay ? 'No content scheduled' : 'Click a day to view details'}</div>
+              <div>
+                <div style={{textAlign:'center',padding:'1.25rem 0',color:'var(--text-dim)'}}>{selectedDay ? 'No content scheduled' : 'Click a day to view details'}</div>
+                {selectedDay && (
+                  <button className="btn btn-primary btn-sm" style={{width:'100%'}} onClick={() => setEditingPost({day:selectedDay, isNew:true})}>+ Add Post for Day {selectedDay}</button>
+                )}
+              </div>
             )}
           </div>
           <div className="card">
