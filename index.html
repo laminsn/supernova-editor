@@ -1538,6 +1538,8 @@ function CreateView() {
   const [approved, setApproved] = useState(false);
   const [contentType, setContentType] = useState('short');
   const [savedStrategyId, setSavedStrategyId] = useState(null);
+  const [brainScore, setBrainScore] = useState(null);
+  const [scoringInProgress, setScoringInProgress] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [collaboratorsForEmail, setCollaboratorsForEmail] = useState([]);
   const [selectedCollabs, setSelectedCollabs] = useState([]);
@@ -1591,8 +1593,10 @@ function CreateView() {
       if (i >= text.length) {
         clearInterval(interval);
         setGenerating(false);
-        // Auto-save to Strategy Vault
-        saveToVault(text);
+        // Auto-save to Strategy Vault then auto-score
+        saveToVault(text).then(savedId => {
+          setTimeout(() => runBrainScore(savedId), 400);
+        });
       }
     }, 8);
   };
@@ -1636,6 +1640,47 @@ function CreateView() {
     setLatestStrategy({id: savedStrategyId, topic, output, contentType, brief:{topic,output,contentType}});
     addToast('Loaded into teleprompter — open Screen Record','success');
     setTimeout(() => setView('screenrec'), 800);
+  };
+
+  const runBrainScore = async (contentIdOverride = null) => {
+    if (!output) return;
+    setScoringInProgress(true);
+    setBrainScore(null);
+    // Try to extract a hook from the strategy output
+    const hookMatch = output.match(/RECOMMENDED HOOK[\s\S]*?(?=\n[A-Z][A-Z]|\Z)/);
+    const hookText = hookMatch ? hookMatch[0].split('\n').slice(1,4).join(' ').trim() : topic;
+    const platformMap = {short:'ig', long:'yt', both:'ig'};
+    const sb = window.SupabaseClient;
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+    try {
+      const r = await fetch('/api/brain-score', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          topic, hook: hookText, script: output, caption: '',
+          platform: platformMap[contentType] || 'ig',
+          duration_seconds: contentType === 'long' ? 1200 : 75,
+          hashtag_count: 25,
+          save: true,
+          workspace_id: sb?.getWorkspaceId?.() || null,
+          content_id: contentIdOverride || savedStrategyId,
+          supabase_url: sbUrl,
+          supabase_key: sbKey,
+        })
+      });
+      if (!r.ok) {
+        addToast('Score API failed','error');
+        setScoringInProgress(false);
+        return;
+      }
+      const data = await r.json();
+      setBrainScore(data);
+      addToast(`Brain Score: ${data.overall_score}/100`, data.overall_score >= 75 ? 'success' : data.overall_score >= 50 ? 'info' : 'error');
+    } catch(e) {
+      addToast('Score request failed: '+e.message,'error');
+    }
+    setScoringInProgress(false);
   };
 
   const downloadPDF = () => {
@@ -1910,6 +1955,66 @@ function CreateView() {
                 <button className="btn btn-ghost" style={{width:'100%'}} disabled={!approved}>Generate Full Script</button>
               </div>
             </div>
+
+            {output && !generating && (
+              <div className="card" style={{borderColor:brainScore && brainScore.overall_score >= 75 ? 'var(--green)' : brainScore && brainScore.overall_score >= 50 ? 'var(--yellow)' : 'var(--glass-border)'}}>
+                <div className="card-head">
+                  <h3>🧠 Brain Score <span style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)',letterSpacing:'.1em',marginLeft:'.4rem'}}>v0 HEURISTIC</span></h3>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.7rem',padding:'.25rem .5rem'}} onClick={() => runBrainScore()} disabled={scoringInProgress}>
+                    {scoringInProgress ? <><span className="spinner"></span></> : '↻ Re-score'}
+                  </button>
+                </div>
+                {scoringInProgress && !brainScore && (
+                  <div style={{padding:'1.5rem',textAlign:'center',color:'var(--text-dim)'}}>
+                    <span className="spinner"></span> Scoring...
+                  </div>
+                )}
+                {brainScore && (
+                  <>
+                    <div style={{display:'flex',alignItems:'center',gap:'1rem',marginBottom:'1rem'}}>
+                      <div style={{width:80,height:80,borderRadius:'50%',background:`conic-gradient(${brainScore.overall_score>=75?'var(--green)':brainScore.overall_score>=50?'var(--yellow)':'var(--red)'} ${brainScore.overall_score*3.6}deg, var(--border) 0)`,display:'grid',placeItems:'center',position:'relative'}}>
+                        <div style={{width:64,height:64,borderRadius:'50%',background:'var(--bg-solid)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontSize:'1.5rem',fontWeight:800,color:brainScore.overall_score>=75?'var(--green)':brainScore.overall_score>=50?'var(--yellow)':'var(--red)'}}>{brainScore.overall_score}</div>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontFamily:'var(--display)',fontSize:'1rem',fontWeight:700}}>{brainScore.overall_score >= 80 ? 'High Viral Potential' : brainScore.overall_score >= 65 ? 'Strong Performer' : brainScore.overall_score >= 50 ? 'Solid Baseline' : 'Needs Work'}</div>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)',marginTop:'.2rem'}}>v0 prediction · improves with engagement data</div>
+                      </div>
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.4rem',marginBottom:'1rem'}}>
+                      {Object.entries(brainScore.scores).map(([k,v]) => (
+                        <div key={k} style={{padding:'.5rem .65rem',background:'var(--glass)',borderRadius:'var(--radius)',border:'1px solid var(--glass-border)'}}>
+                          <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)',letterSpacing:'.1em',textTransform:'uppercase'}}>{k.replace('_',' ')}</div>
+                          <div style={{display:'flex',alignItems:'center',gap:'.5rem',marginTop:'.25rem'}}>
+                            <div style={{flex:1,height:4,background:'var(--border)',borderRadius:2,overflow:'hidden'}}>
+                              <div style={{height:'100%',width:v+'%',background:v>=75?'var(--green)':v>=50?'var(--yellow)':'var(--red)',transition:'width .5s'}}></div>
+                            </div>
+                            <span style={{fontFamily:'var(--mono)',fontSize:'.78rem',fontWeight:700,color:v>=75?'var(--green)':v>=50?'var(--yellow)':'var(--red)'}}>{v}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {brainScore.rationale?.strengths?.length > 0 && (
+                      <div style={{marginBottom:'.5rem'}}>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--green)',letterSpacing:'.1em',marginBottom:'.25rem',fontWeight:700}}>STRENGTHS</div>
+                        {brainScore.rationale.strengths.map((s,i) => <div key={i} style={{fontSize:'.78rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'.2rem'}}>✓ {s}</div>)}
+                      </div>
+                    )}
+                    {brainScore.rationale?.weaknesses?.length > 0 && (
+                      <div style={{marginBottom:'.5rem'}}>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--red)',letterSpacing:'.1em',marginBottom:'.25rem',fontWeight:700}}>WEAKNESSES</div>
+                        {brainScore.rationale.weaknesses.map((s,i) => <div key={i} style={{fontSize:'.78rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'.2rem'}}>✗ {s}</div>)}
+                      </div>
+                    )}
+                    {brainScore.rationale?.suggestions?.length > 0 && (
+                      <div>
+                        <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--yellow)',letterSpacing:'.1em',marginBottom:'.25rem',fontWeight:700}}>SUGGESTIONS</div>
+                        {brainScore.rationale.suggestions.map((s,i) => <div key={i} style={{fontSize:'.78rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'.2rem'}}>→ {s}</div>)}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {output && !generating && (
               <div className="card">
