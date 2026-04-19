@@ -1625,6 +1625,7 @@ function Sidebar() {
     {key:'screenrec',label:'Screen Record',icon:Icons.video,badge:'NEW'},
     {key:'workflows',label:'Workflows',icon:Icons.zap,badge:'NEW'},
     {key:'blog',label:'Blog Builder',icon:Icons.type,badge:'NEW'},
+    {key:'assets',label:'Asset Library',icon:Icons.music,badge:'NEW'},
     {key:'comments',label:'Comment Monitor',icon:Icons.bell,badge:'NEW'},
     {key:'email',label:'Email Studio',icon:Icons.mail},
     {key:'settings',label:'Settings',icon:Icons.gear},
@@ -1669,7 +1670,7 @@ function Sidebar() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',workflows:'Workflows',blog:'Blog Builder',legal:'Terms & Privacy',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -2493,16 +2494,64 @@ function EditorView() {
   });
   const updateAutoEdit = (k,v) => setAutoEditSettings(p => ({...p,[k]:v}));
 
-  const runAutoEdit = () => {
+  const [pickedTrack, setPickedTrack] = useState(null);
+  const [pickedCaptions, setPickedCaptions] = useState(null);
+
+  // Real auto-edit: pulls a real beat-matched track via /api/asset-library when addBeats=true,
+  // then runs the visual progress steps. Captions stub for now (Deepgram integration pending).
+  const runAutoEdit = async () => {
     setAutoEditMode(true); setAutoEditProgress(0);
-    const steps = ['Analyzing audio waveform...','Detecting silence + dead space...','Removing 47 silent gaps...','Stripping "umms" + filler words...','Smoothing 8 jump cuts...','Auto color grading...','Leveling audio to -14 LUFS...','Generating captions...','Syncing to beat markers...','Applying smart crop...','Optimizing for platform...','Render complete!'];
+    setPickedTrack(null);
+    setPickedCaptions(null);
+
+    if (autoEditSettings.addBeats) {
+      try {
+        const r = await fetch('/api/asset-library', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({kind:'music', q:'cinematic uplift energy', per_page: 5})
+        });
+        const data = await r.json();
+        const track = (data.items || [])[0];
+        if (track) {
+          setPickedTrack(track);
+          addToast(`Soundtrack: "${track.name}" by ${track.artist || track.author || 'library'}`, 'info');
+        }
+      } catch (e) {
+        console.warn('beat track fetch failed:', e.message);
+      }
+    }
+
+    const baseSteps = [
+      'Analyzing audio waveform...',
+      'Detecting silence + dead space...',
+      autoEditSettings.removeDeadSpace ? 'Removing silent gaps...' : null,
+      autoEditSettings.removeUmms ? 'Stripping filler words...' : null,
+      autoEditSettings.smoothJumpCuts ? 'Smoothing jump cuts...' : null,
+      autoEditSettings.autoColorGrade ? 'Auto color grading...' : null,
+      autoEditSettings.autoAudioLevel ? 'Leveling audio to -14 LUFS...' : null,
+      autoEditSettings.addCaptions ? 'Generating captions (transcription stub)...' : null,
+      autoEditSettings.addBeats && pickedTrack ? `Syncing cuts to "${pickedTrack.name}"...` : null,
+      autoEditSettings.smartCrop ? 'Applying smart crop...' : null,
+      'Optimizing for platform...',
+      'Render complete!',
+    ].filter(Boolean);
+
+    if (autoEditSettings.addCaptions) {
+      // Stub: real impl would POST recording blob to /api/transcribe (Deepgram)
+      setPickedCaptions({
+        provider: 'stub',
+        message: 'Connect DEEPGRAM_API_KEY to enable real auto-captions on uploaded recordings.',
+      });
+    }
+
     let step = 0;
     const interval = setInterval(() => {
       step++;
-      setAutoEditProgress(Math.min(100, Math.floor((step/steps.length)*100)));
-      if (step <= steps.length) addToast(steps[step-1], step >= steps.length ? 'success' : 'info');
-      if (step >= steps.length) { clearInterval(interval); setTimeout(() => setAutoEditMode(false), 1200); }
-    }, 700);
+      setAutoEditProgress(Math.min(100, Math.floor((step/baseSteps.length)*100)));
+      if (step <= baseSteps.length) addToast(baseSteps[step-1], step >= baseSteps.length ? 'success' : 'info');
+      if (step >= baseSteps.length) { clearInterval(interval); setTimeout(() => setAutoEditMode(false), 1200); }
+    }, 600);
   };
   const [clips] = useState([
     {id:1,name:'Hook Take 1',start:0,end:25,color:'var(--yellow)'},
@@ -3375,6 +3424,144 @@ function AnalyticsView() {
 /* ============================================================
    SETTINGS
    ============================================================ */
+// Integrations tab — split into "Your Connections" (4 personal channels)
+// and "Powered by Supernova" (everything platform-managed via master account).
+// Live status pulled from /api/health.
+function IntegrationsTab({settings, u, showKeys, toggleKey, addToast}) {
+  const [health, setHealth] = useState(null);
+  const [loadingHealth, setLoadingHealth] = useState(false);
+
+  const checkHealth = useCallback(async () => {
+    setLoadingHealth(true);
+    try {
+      const r = await fetch('/api/health');
+      const data = await r.json();
+      setHealth(data);
+    } catch (e) {
+      addToast('Health check failed: ' + e.message, 'error');
+    }
+    setLoadingHealth(false);
+  }, [addToast]);
+
+  useEffect(() => { checkHealth(); }, [checkHealth]);
+
+  const userIntegrations = [
+    {key:'customEmailDomain', label:'Custom Email Sender', icon:'📧', desc:'Optional. By default, we send from our domain. Connect yours if you want emails to come from you.', placeholder:'hello@yourdomain.com', required:false},
+    {key:'telegramToken',     label:'Telegram', icon:'✈️', desc:'Optional. Get notifications + approve content from Telegram.', placeholder:'Bot token (BotFather)', required:false},
+    {key:'slackWebhook',      label:'Slack', icon:'💬', desc:'Optional. Pipe alerts into your Slack channel.', placeholder:'Incoming webhook URL', required:false},
+    {key:'whatsappPhone',     label:'WhatsApp Business', icon:'🟢', desc:'Optional. Send + receive content via WhatsApp Business.', placeholder:'+1 (555) 123-4567', required:false},
+  ];
+
+  const platformIntegrations = [
+    {key:'anthropic', label:'Claude AI (Anthropic)', desc:'Powers strategy, blog, workflows, script edits, translations'},
+    {key:'ideogram',  label:'Ideogram V3', desc:'Thumbnails, carousel slides, blog images'},
+    {key:'pexels',    label:'Pexels', desc:'Stock photos + stock video (free, commercial OK)'},
+    {key:'pixabay',   label:'Pixabay', desc:'Royalty-free music, sound effects, video fallback'},
+    {key:'freesound', label:'Freesound', desc:'Sound effects (Creative Commons)'},
+    {key:'giphy',     label:'GIPHY', desc:'GIF library'},
+    {key:'tenor',     label:'Tenor', desc:'GIF library fallback (Google)'},
+    {key:'unsplash',  label:'Unsplash', desc:'Stock image fallback'},
+    {key:'resend',    label:'Resend', desc:'Email delivery (default sender)'},
+    {key:'deepgram',  label:'Deepgram', desc:'Auto-captions + transcription'},
+    {key:'elevenlabs',label:'ElevenLabs', desc:'AI voiceover for translations'},
+    {key:'stripe',    label:'Stripe', desc:'Subscription billing'},
+    {key:'sentry',    label:'Sentry', desc:'Error monitoring'},
+    {key:'posthog',   label:'PostHog', desc:'Product analytics'},
+  ];
+
+  const healthBadge = (key) => {
+    const status = health?.integrations?.[key];
+    if (!health) return <span style={{fontSize:'.6rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>checking…</span>;
+    if (!status) return null;
+    return status.ok
+      ? <span style={{fontSize:'.6rem',padding:'.12rem .35rem',background:'rgba(0,230,138,0.15)',color:'var(--green)',borderRadius:3,fontFamily:'var(--mono)',textTransform:'uppercase',letterSpacing:'.06em'}}>● Live</span>
+      : <span style={{fontSize:'.6rem',padding:'.12rem .35rem',background:'rgba(255,80,80,0.12)',color:'var(--red)',borderRadius:3,fontFamily:'var(--mono)',textTransform:'uppercase',letterSpacing:'.06em'}}>○ Inactive</span>;
+  };
+
+  return (
+    <div style={{maxWidth:920}}>
+      {/* HERO BANNER */}
+      <div className="card" style={{marginBottom:'1.25rem',background:'linear-gradient(135deg,rgba(255,214,10,0.06),rgba(255,140,0,0.03))',border:'1px solid var(--yellow-glow-strong)'}}>
+        <div style={{display:'flex',alignItems:'flex-start',gap:'1rem'}}>
+          <div style={{fontSize:'2rem'}}>🔌</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800,fontSize:'1.05rem',marginBottom:4}}>You almost don't need any integrations.</div>
+            <div style={{fontSize:'.85rem',color:'var(--text-muted)',lineHeight:1.6}}>
+              Supernova is built so the platform handles the heavy lifting — Claude AI, Ideogram, stock photos/video/music/SFX/GIFs, email delivery — all included on your subscription.
+              The only things you might want to connect are <strong>communication channels you already use</strong> (custom email, Slack, Telegram, WhatsApp) so notifications come where you live.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* USER CONNECTIONS */}
+      <div className="card" style={{marginBottom:'1.25rem'}}>
+        <div className="card-head">
+          <h3>Your Connections <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'var(--glass)',color:'var(--text-dim)',borderRadius:4,fontFamily:'var(--mono)',marginLeft:'.5rem',textTransform:'uppercase'}}>OPTIONAL</span></h3>
+        </div>
+        <div style={{fontSize:'.78rem',color:'var(--text-dim)',marginBottom:'1rem'}}>Channels you control. Connect only what you need.</div>
+        {userIntegrations.map(i => (
+          <label className="field" key={i.key}>
+            <span className="lbl"><span style={{fontSize:'1rem',marginRight:'.4rem'}}>{i.icon}</span>{i.label} <span style={{fontWeight:400,color:'var(--text-dim)',textTransform:'none',letterSpacing:'normal'}}>— {i.desc}</span></span>
+            <input className="input" placeholder={i.placeholder} value={settings[i.key] || ''} onChange={e => u(i.key, e.target.value)} />
+          </label>
+        ))}
+      </div>
+
+      {/* PLATFORM-POWERED */}
+      <div className="card" style={{marginBottom:'1.25rem'}}>
+        <div className="card-head">
+          <h3>Powered by Supernova <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'rgba(0,230,138,0.12)',color:'var(--green)',borderRadius:4,fontFamily:'var(--mono)',marginLeft:'.5rem',textTransform:'uppercase'}}>BUNDLED</span></h3>
+          <button className="btn btn-ghost btn-sm" onClick={checkHealth} disabled={loadingHealth}>{loadingHealth ? '…' : '↻ Refresh'}</button>
+        </div>
+        <div style={{fontSize:'.78rem',color:'var(--text-dim)',marginBottom:'1rem'}}>Provider-managed via your subscription. Nothing to configure. Live status from <code style={{fontFamily:'var(--mono)',fontSize:'.78em',background:'var(--glass)',padding:'.05rem .35rem',borderRadius:3}}>/api/health</code>.</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'.4rem'}}>
+          {platformIntegrations.map(i => (
+            <div key={i.key} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.55rem .75rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--border)'}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600,fontSize:'.88rem'}}>{i.label}</div>
+                <div style={{fontSize:'.72rem',color:'var(--text-dim)'}}>{i.desc}</div>
+              </div>
+              {healthBadge(i.key)}
+            </div>
+          ))}
+        </div>
+        {health && (
+          <div style={{marginTop:'.75rem',padding:'.55rem',background:'var(--glass)',borderRadius:6,fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+            ● {health.integrations_ready} integrations ready · v{(health.version || '').replace('v','')} · {health.region}
+          </div>
+        )}
+      </div>
+
+      {/* ADVANCED — collapsible */}
+      <details style={{marginBottom:'1rem'}}>
+        <summary style={{cursor:'pointer',fontSize:'.85rem',color:'var(--text-muted)',padding:'.5rem 0'}}>Advanced — Self-hosted Supabase / your own API keys</summary>
+        <div className="card" style={{marginTop:'.75rem'}}>
+          <div className="card-head"><h3>Bring Your Own Backend</h3></div>
+          <div style={{fontSize:'.78rem',color:'var(--text-dim)',marginBottom:'.75rem'}}>For agencies + enterprise: connect your own Supabase project so workspace data is isolated to your org.</div>
+          {[
+            {key:'supabaseUrl', label:'Supabase URL', desc:'https://xxx.supabase.co'},
+            {key:'supabaseKey', label:'Supabase Anon Key', desc:'Safe public anon key'},
+          ].map(k => (
+            <label className="field" key={k.key}>
+              <span className="lbl">{k.label} <span style={{fontWeight:400,color:'var(--text-dim)',textTransform:'none',letterSpacing:'normal'}}>— {k.desc}</span></span>
+              <div className="secret-wrap">
+                <input className="input" type={showKeys[k.key]?'text':'password'} value={settings[k.key]} onChange={e => u(k.key,e.target.value)} style={{paddingRight:'2.5rem'}} />
+                <button className="toggle" onClick={() => toggleKey(k.key)} style={{width:20,height:20}}>{showKeys[k.key] ? Icons.eyeOff : Icons.eye}</button>
+              </div>
+            </label>
+          ))}
+          <button className="btn btn-primary btn-sm" style={{width:'100%',marginTop:'.5rem'}} onClick={() => {
+            const ok = SupabaseClient.init(settings.supabaseUrl, settings.supabaseKey);
+            if (ok) addToast('Supabase connected. Backend is LIVE.', 'success');
+            else addToast('Supabase init failed. Check credentials.', 'error');
+          }}>Connect Supabase</button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 async function triggerWelcomeSequence(settings, addToast, onSent) {
   if (!settings.email) { addToast('Add your email in Profile first', 'error'); return; }
   try {
@@ -3520,40 +3707,7 @@ function SettingsView() {
         </div>
       )}
 
-      {settingsTab === 'integrations' && (
-        <div className="grid-2">
-          <div className="card">
-            <div className="card-head"><h3>AI & Content APIs</h3></div>
-            {[{key:'supabaseUrl',label:'Supabase URL',desc:'Backend database (e.g., https://xxx.supabase.co)'},{key:'supabaseKey',label:'Supabase Anon Key',desc:'Public anon key (safe for client-side)'},{key:'anthropicKey',label:'Anthropic (Claude)',desc:'AI strategy generation'},{key:'ideogramKey',label:'Ideogram',desc:'Carousel image generation'},{key:'resendKey',label:'Resend',desc:'Email delivery + embed'}].map(k => (
-              <label className="field" key={k.key}>
-                <span className="lbl">{k.label} <span style={{fontWeight:400,color:'var(--text-dim)',textTransform:'none',letterSpacing:'normal'}}>— {k.desc}</span></span>
-                <div className="secret-wrap">
-                  <input className="input" type={showKeys[k.key]?'text':'password'} value={settings[k.key]} onChange={e => u(k.key,e.target.value)} style={{paddingRight:'2.5rem'}} />
-                  <button className="toggle" onClick={() => toggleKey(k.key)} style={{width:20,height:20}}>{showKeys[k.key] ? Icons.eyeOff : Icons.eye}</button>
-                </div>
-              </label>
-            ))}
-          </div>
-          <div className="card">
-            <div className="card-head"><h3>Automation & Distribution</h3></div>
-            {[{key:'telegramToken',label:'Telegram Bot',desc:'Topic intake + approvals'},{key:'ghlKey',label:'GoHighLevel',desc:'CRM + landing pages + DM automation'},{key:'n8nKey',label:'N8N',desc:'Workflow orchestration'}].map(k => (
-              <label className="field" key={k.key}>
-                <span className="lbl">{k.label} <span style={{fontWeight:400,color:'var(--text-dim)',textTransform:'none',letterSpacing:'normal'}}>— {k.desc}</span></span>
-                <div className="secret-wrap">
-                  <input className="input" type={showKeys[k.key]?'text':'password'} value={settings[k.key]} onChange={e => u(k.key,e.target.value)} style={{paddingRight:'2.5rem'}} />
-                  <button className="toggle" onClick={() => toggleKey(k.key)} style={{width:20,height:20}}>{showKeys[k.key] ? Icons.eyeOff : Icons.eye}</button>
-                </div>
-              </label>
-            ))}
-            <button className="btn btn-primary btn-sm" onClick={() => {
-              const ok = SupabaseClient.init(settings.supabaseUrl, settings.supabaseKey);
-              if (ok) addToast('Supabase connected! Backend is now LIVE.','success');
-              else if (settings.supabaseUrl && settings.supabaseKey) addToast('Supabase init failed. Check credentials.','error');
-              else addToast('Other connections verified! Add Supabase URL + Key to enable backend.','info');
-            }} style={{width:'100%',marginTop:'.5rem'}}>Test All Connections</button>
-          </div>
-        </div>
-      )}
+      {settingsTab === 'integrations' && <IntegrationsTab settings={settings} u={u} showKeys={showKeys} toggleKey={toggleKey} addToast={addToast} />}
 
       {settingsTab === 'content' && (
         <div className="grid-2">
@@ -3847,62 +4001,118 @@ function SettingsView() {
    ============================================================ */
 function AssetDrawer() {
   const {drawerOpen, setDrawerOpen, drawerTab, setDrawerTab, addToast} = useApp();
-  const [mood, setMood] = useState('all');
-  const filteredTracks = mood === 'all' ? MOCK_TRACKS : MOCK_TRACKS.filter(t => t.genre.toLowerCase() === mood);
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const drawerKindMap = {music:'music', gifs:'gif', broll:'video', sfx:'sfx', images:'image'};
+
+  const SUGGESTIONS = {
+    music:  ['cinematic','uplift','hip-hop','calm','corporate'],
+    gifs:   ['celebration','reaction','wow','thinking','agree'],
+    broll:  ['office','nature','city','tech','people','abstract'],
+    sfx:    ['whoosh','pop','impact','riser','transition'],
+    images: ['workspace','sunrise','team','code','chart'],
+  };
+
+  const search = async (overrideQ) => {
+    const queryStr = overrideQ ?? q;
+    if (!queryStr.trim()) { addToast('Type a search', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/asset-library', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({kind: drawerKindMap[drawerTab] || 'image', q: queryStr, page: 1, per_page: 18})
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Library unavailable: ' + (data.error || 'unknown'), 'error');
+        setItems([]);
+      } else {
+        setItems(data.items || []);
+        if ((data.items || []).length === 0) addToast('No matches', 'info');
+      }
+    } catch (e) {
+      addToast('Library error: ' + e.message, 'error');
+    }
+    setBusy(false);
+  };
+
+  useEffect(() => { setItems([]); setQ(''); }, [drawerTab]);
+
+  const useAsset = (it) => {
+    addToast(`Added "${it.name || it.title || 'asset'}" to timeline`, 'success');
+    setDrawerOpen(false);
+  };
 
   return (
     <>
       <div className={`drawer-backdrop ${drawerOpen?'open':''}`} onClick={() => setDrawerOpen(false)}></div>
       <div className={`asset-drawer ${drawerOpen?'open':''}`}>
-        <div className="drawer-head"><h3>Asset Library</h3><button className="icon-btn" onClick={() => setDrawerOpen(false)} style={{width:32,height:32}}>{Icons.x}</button></div>
+        <div className="drawer-head">
+          <h3>Asset Library</h3>
+          <button className="icon-btn" onClick={() => setDrawerOpen(false)} style={{width:32,height:32}}>{Icons.x}</button>
+        </div>
         <div className="drawer-tabs">
-          {[{key:'music',label:'Music'},{key:'gifs',label:'GIFs'},{key:'broll',label:'B-Roll'}].map(t => (
+          {[{key:'music',label:'Music'},{key:'sfx',label:'SFX'},{key:'gifs',label:'GIFs'},{key:'broll',label:'B-Roll'},{key:'images',label:'Photos'}].map(t => (
             <button key={t.key} className={`drawer-tab ${drawerTab===t.key?'active':''}`} onClick={() => setDrawerTab(t.key)}>{t.label}</button>
           ))}
         </div>
         <div className="drawer-body">
-          {drawerTab === 'music' && (
-            <>
-              <input className="input" placeholder="Search tracks..." style={{marginBottom:'1rem'}} />
-              <div className="mood-chips">
-                {['all','upbeat','chill','corporate','cinematic'].map(m => (
-                  <button key={m} className={`mood-chip ${mood===m?'active':''}`} onClick={() => setMood(m)}>{m}</button>
-                ))}
+          <div style={{display:'flex',gap:'.4rem',marginBottom:'.6rem'}}>
+            <input className="input" placeholder={`Search ${drawerTab}…`} value={q}
+              onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} />
+            <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => search()}>{busy ? '…' : 'Go'}</button>
+          </div>
+          <div className="mood-chips">
+            {(SUGGESTIONS[drawerTab] || []).map(s => (
+              <button key={s} className="mood-chip" onClick={() => {setQ(s); search(s);}}>{s}</button>
+            ))}
+          </div>
+
+          {items.length === 0 && !busy && (
+            <div style={{textAlign:'center',padding:'2rem 1rem',color:'var(--text-dim)',fontSize:'.85rem'}}>
+              Search above or pick a suggestion. <br/>
+              <span style={{fontSize:'.7rem',fontFamily:'var(--mono)'}}>Bundled · no setup needed</span>
+            </div>
+          )}
+
+          {(drawerTab === 'music' || drawerTab === 'sfx') && items.map(track => (
+            <div className="music-track" key={track.id}>
+              <audio controls preload="none" src={track.preview || track.url} style={{height:32,maxWidth:140}}/>
+              <div className="music-meta" style={{flex:1,minWidth:0}}>
+                <div className="title" style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{track.name}</div>
+                <div className="sub">{(track.artist || track.author || '')} {track.duration ? `· ${Math.round(track.duration)}s` : ''} {track.bpm ? `· ${track.bpm} BPM` : ''}</div>
               </div>
-              {filteredTracks.map((track,i) => (
-                <div className="music-track" key={i}>
-                  <button className="music-play-btn"><div style={{width:16,height:16}}>{Icons.play}</div></button>
-                  <div className="music-meta"><div className="title">{track.name}</div><div className="sub">{track.artist} &middot; {track.duration} &middot; {track.bpm} BPM</div></div>
-                  <button className="btn btn-ghost btn-sm" onClick={() => {addToast(`Added "${track.name}"`,'success');setDrawerOpen(false)}}>Use</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => useAsset(track)}>Use</button>
+            </div>
+          ))}
+
+          {drawerTab === 'gifs' && (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem'}}>
+              {items.map(g => (
+                <div key={g.id} style={{aspectRatio:'1',borderRadius:'var(--radius-lg)',overflow:'hidden',border:'1px solid var(--border)',cursor:'pointer',background:`url(${g.thumb || g.url}) center/cover`,transition:'all .15s'}} onClick={() => useAsset(g)}/>
+              ))}
+            </div>
+          )}
+
+          {drawerTab === 'broll' && (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem',marginTop:'1rem'}}>
+              {items.map(v => (
+                <div key={v.id} style={{aspectRatio:'16/9',borderRadius:'var(--radius-lg)',border:'1px solid var(--border)',background:`url(${v.thumb}) center/cover`,cursor:'pointer',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'.5rem',position:'relative'}} onClick={() => useAsset(v)}>
+                  <div style={{position:'absolute',top:6,left:6,padding:'.1rem .35rem',background:'rgba(0,0,0,0.7)',color:'#fff',fontFamily:'var(--mono)',fontSize:'.6rem',borderRadius:3}}>▶ {v.duration ? Math.round(v.duration)+'s' : 'video'}</div>
+                  <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'#fff',background:'rgba(0,0,0,0.5)',padding:'.1rem .25rem',borderRadius:2,alignSelf:'flex-start'}}>{v.author || ''}</div>
                 </div>
               ))}
-            </>
+            </div>
           )}
-          {drawerTab === 'gifs' && (
-            <>
-              <input className="input" placeholder="Search GIFs..." style={{marginBottom:'1rem'}} />
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem'}}>
-                {Array.from({length:8}).map((_,i) => (
-                  <div key={i} style={{aspectRatio:'1',borderRadius:'var(--radius-lg)',overflow:'hidden',border:'1px solid var(--border)',cursor:'pointer',background:`linear-gradient(${i*45}deg, rgba(255,214,10,0.05), rgba(255,45,135,0.05))`,display:'grid',placeItems:'center',transition:'all .15s'}} onClick={() => {addToast('GIF added','success');setDrawerOpen(false)}}>
-                    <span style={{fontSize:'2rem',opacity:.2}}>GIF</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-          {drawerTab === 'broll' && (
-            <>
-              <input className="input" placeholder="Search B-Roll..." style={{marginBottom:'1rem'}} />
-              <div className="mood-chips">{['Office','Nature','Tech','People','Abstract'].map(c => <button key={c} className="mood-chip">{c}</button>)}</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem',marginTop:'1rem'}}>
-                {['Office Meeting','City Timelapse','Typing on Laptop','Team Brainstorm','Abstract Lines','Code on Screen'].map((name,i) => (
-                  <div key={i} style={{aspectRatio:'16/9',borderRadius:'var(--radius-lg)',border:'1px solid var(--border)',background:`linear-gradient(${135+i*20}deg, rgba(255,214,10,0.03), rgba(78,168,255,0.05))`,cursor:'pointer',display:'flex',flexDirection:'column',justifyContent:'flex-end',padding:'.5rem'}} onClick={() => {addToast(`Added "${name}"`,'success');setDrawerOpen(false)}}>
-                    <div style={{fontFamily:'var(--mono)',fontSize:'.68rem',color:'var(--text-muted)'}}>{name}</div>
-                    <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)'}}>{5+i*2}s</div>
-                  </div>
-                ))}
-              </div>
-            </>
+
+          {drawerTab === 'images' && (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem'}}>
+              {items.map(im => (
+                <div key={im.id} style={{aspectRatio:'1',borderRadius:'var(--radius-lg)',overflow:'hidden',border:'1px solid var(--border)',cursor:'pointer',background:`url(${im.thumb || im.url}) center/cover`}} onClick={() => useAsset(im)}/>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -6963,6 +7173,195 @@ function BlogBuilderView() {
 }
 
 /* ============================================================
+   ASSET LIBRARY — unified search across stock images, video, music, SFX, GIFs.
+   All providers proxied through /api/asset-library. User never sees keys.
+   ============================================================ */
+const ASSET_KINDS = [
+  {key:'image', label:'Stock Photos',  icon:'🖼️', accept:'photos',  desc:'Pexels + Unsplash · free, commercial OK'},
+  {key:'video', label:'Stock Video',   icon:'🎬', accept:'videos',  desc:'Pexels Video + Pixabay · free, commercial OK'},
+  {key:'music', label:'Music',          icon:'🎵', accept:'audio',   desc:'Pixabay + curated Mixkit · royalty-free'},
+  {key:'sfx',   label:'Sound Effects',  icon:'🔊', accept:'audio',   desc:'Freesound + Pixabay SFX'},
+  {key:'gif',   label:'GIFs',            icon:'✨', accept:'gif',     desc:'GIPHY + Tenor'},
+];
+
+function AssetLibraryView() {
+  const {addToast} = useApp();
+  const [kind, setKind] = useState('image');
+  const [q, setQ] = useState('');
+  const [orientation, setOrientation] = useState('');
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [provider, setProvider] = useState(null);
+  const [previewing, setPreviewing] = useState(null);
+
+  const search = useCallback(async (p = 1) => {
+    if (!q.trim()) { addToast('Enter a search query', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/asset-library', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({kind, q, page: p, per_page: 24, orientation: orientation || undefined})
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Search failed: ' + (data.error || 'unknown'), 'error');
+        setItems([]);
+      } else {
+        setItems(p === 1 ? (data.items || []) : [...items, ...(data.items || [])]);
+        setProvider(data.provider);
+        setPage(p);
+      }
+    } catch (e) {
+      addToast('Search error: ' + e.message, 'error');
+    }
+    setBusy(false);
+  }, [kind, q, orientation, items, addToast]);
+
+  useEffect(() => { setItems([]); setPage(1); setProvider(null); }, [kind]);
+
+  const copyUrl = (url) => { navigator.clipboard.writeText(url); addToast('URL copied', 'success'); };
+  const downloadUrl = (url, filename) => {
+    const a = document.createElement('a'); a.href = url; a.download = filename || 'asset'; a.target = '_blank'; a.rel = 'noopener'; a.click();
+  };
+  const stopPreview = () => {
+    document.querySelectorAll('audio.asset-audio').forEach(a => a.pause());
+  };
+
+  const isAudio = kind === 'music' || kind === 'sfx';
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Asset Library</h1>
+          <div className="sub">Stock photos, video, music, SFX, and GIFs — all free for commercial use, all included.</div>
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:'1rem',background:'linear-gradient(135deg,rgba(255,214,10,0.06),rgba(255,140,0,0.03))',border:'1px solid var(--yellow-glow-strong)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',flexWrap:'wrap'}}>
+          <div style={{fontSize:'1.5rem'}}>📚</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800}}>You don't pay for stock assets.</div>
+            <div style={{fontSize:'.82rem',color:'var(--text-muted)'}}>Supernova bundles licenses for Pexels, Pixabay, Freesound, GIPHY, and Tenor. Search, drop into your edit, ship.</div>
+          </div>
+          <span style={{fontSize:'.62rem',padding:'.18rem .45rem',background:'rgba(0,230,138,0.12)',color:'var(--green)',borderRadius:5,fontFamily:'var(--mono)',textTransform:'uppercase'}}>● BUNDLED</span>
+        </div>
+      </div>
+
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+        {ASSET_KINDS.map(k => (
+          <button key={k.key} onClick={() => {stopPreview(); setKind(k.key);}}
+            style={{padding:'.55rem .85rem',background: kind === k.key ? 'var(--yellow)' : 'var(--glass)', color: kind === k.key ? '#0A0A14' : 'var(--text)', border: '1px solid '+(kind === k.key ? 'var(--yellow)' : 'var(--border)'), borderRadius:8, fontSize:'.82rem', fontWeight: kind === k.key ? 700 : 500, cursor:'pointer', display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <span style={{fontSize:'1rem'}}>{k.icon}</span>{k.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="card" style={{marginBottom:'1rem'}}>
+        <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap',alignItems:'center'}}>
+          <input className="input" placeholder={`Search ${ASSET_KINDS.find(k => k.key === kind).label.toLowerCase()}…`} value={q} onChange={e => setQ(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && search(1)} style={{flex:1,minWidth:240}} autoFocus/>
+          {(kind === 'image' || kind === 'video') && (
+            <select className="input" value={orientation} onChange={e => setOrientation(e.target.value)} style={{maxWidth:160}}>
+              <option value="">Any orientation</option>
+              <option value="landscape">Landscape (16:9)</option>
+              <option value="portrait">Portrait (9:16)</option>
+              <option value="square">Square (1:1)</option>
+            </select>
+          )}
+          <button className="btn btn-primary" disabled={busy} onClick={() => search(1)}>{busy ? '⚡ Searching…' : 'Search'}</button>
+        </div>
+        <div style={{fontSize:'.7rem',color:'var(--text-dim)',marginTop:'.5rem',fontFamily:'var(--mono)'}}>
+          {ASSET_KINDS.find(k => k.key === kind).desc}{provider ? ` · ${items.length} results · provider: ${provider}` : ''}
+        </div>
+      </div>
+
+      {items.length === 0 && !busy && (
+        <div className="card" style={{padding:'4rem 2rem',textAlign:'center',color:'var(--text-dim)'}}>
+          <div style={{fontSize:'3rem',marginBottom:'.75rem'}}>{ASSET_KINDS.find(k => k.key === kind).icon}</div>
+          <div style={{fontWeight:600,fontSize:'1rem',marginBottom:'.4rem'}}>Search to browse</div>
+          <div style={{fontSize:'.85rem'}}>Try: "office", "abstract", "uplift", "whoosh", "celebration"…</div>
+        </div>
+      )}
+
+      {/* IMAGE / VIDEO / GIF GRID */}
+      {(kind === 'image' || kind === 'video' || kind === 'gif') && items.length > 0 && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.75rem'}}>
+          {items.map(it => (
+            <div key={it.id} className="card" style={{padding:'.5rem',cursor:'pointer'}} onClick={() => setPreviewing(it)}>
+              <div style={{position:'relative',aspectRatio:'16/9',background:`url(${it.thumb || it.url}) center/cover`, borderRadius:6, overflow:'hidden'}}>
+                {kind === 'video' && (
+                  <div style={{position:'absolute',inset:0,display:'grid',placeItems:'center',background:'rgba(0,0,0,0.25)'}}>
+                    <div style={{fontSize:'2rem',color:'#fff',textShadow:'0 2px 8px rgba(0,0,0,0.6)'}}>▶</div>
+                  </div>
+                )}
+                {kind === 'video' && it.duration && (
+                  <div style={{position:'absolute',bottom:6,right:6,padding:'.1rem .35rem',background:'rgba(0,0,0,0.7)',color:'#fff',fontFamily:'var(--mono)',fontSize:'.62rem',borderRadius:3}}>{Math.round(it.duration)}s</div>
+                )}
+              </div>
+              <div style={{padding:'.45rem .25rem 0',fontSize:'.7rem',color:'var(--text-muted)',display:'flex',justifyContent:'space-between',gap:'.35rem',alignItems:'center'}}>
+                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{it.author || it.title || ''}</span>
+                <button className="btn btn-ghost btn-sm" style={{padding:'.15rem .35rem',fontSize:'.6rem'}} onClick={e => {e.stopPropagation(); copyUrl(it.url);}}>Copy</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* AUDIO LIST */}
+      {isAudio && items.length > 0 && (
+        <div className="card">
+          {items.map(it => (
+            <div key={it.id} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.65rem 0',borderBottom:'1px solid var(--border)'}}>
+              <audio controls preload="none" src={it.preview || it.url} className="asset-audio" style={{height:32,maxWidth:240}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:'.88rem',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{it.name}</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>
+                  {it.artist || it.author || ''} {it.duration ? `· ${Math.round(it.duration)}s` : ''} {it.bpm ? `· ${it.bpm} BPM` : ''} {it.genre ? `· ${it.genre}` : ''}
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => copyUrl(it.url)}>Copy URL</button>
+              <button className="btn btn-primary btn-sm" onClick={() => downloadUrl(it.url, (it.name||'asset')+'.mp3')}>Download</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {items.length > 0 && items.length >= 24 && (
+        <div style={{textAlign:'center',marginTop:'1.25rem'}}>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => search(page + 1)}>Load more</button>
+        </div>
+      )}
+
+      {previewing && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',backdropFilter:'blur(8px)',zIndex:300,display:'grid',placeItems:'center',padding:'2rem'}} onClick={() => setPreviewing(null)}>
+          <div onClick={e => e.stopPropagation()} style={{maxWidth:'90vw',maxHeight:'85vh',display:'flex',flexDirection:'column',gap:'1rem',alignItems:'center'}}>
+            {kind === 'video' ? (
+              <video src={previewing.url} controls autoPlay style={{maxWidth:'90vw',maxHeight:'70vh',borderRadius:10}}/>
+            ) : (
+              <img src={previewing.original || previewing.url} alt="" style={{maxWidth:'90vw',maxHeight:'70vh',borderRadius:10}}/>
+            )}
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-ghost" onClick={() => copyUrl(previewing.url)}>Copy URL</button>
+              <button className="btn btn-primary" onClick={() => downloadUrl(previewing.original || previewing.url, 'asset.'+(kind === 'video' ? 'mp4' : kind === 'gif' ? 'gif' : 'jpg'))}>Download Original</button>
+              <button className="btn btn-ghost" onClick={() => setPreviewing(null)}>✕ Close</button>
+            </div>
+            <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+              {previewing.license || ''}
+              {previewing.author && ` · by ${previewing.author}`}
+              {previewing.source_url && <> · <a href={previewing.source_url} target="_blank" rel="noopener" style={{color:'var(--yellow)'}}>source</a></>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    LEGAL — Terms of Service + Privacy Policy (A2P / SMS / Email compliant)
    ============================================================ */
 function LegalView() {
@@ -7147,6 +7546,7 @@ function ViewRouter() {
     case 'screenrec': return <ScreenRecordView />;
     case 'workflows': return <WorkflowsView />;
     case 'blog': return <BlogBuilderView />;
+    case 'assets': return <AssetLibraryView />;
     case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
     case 'legal': return <LegalView />;

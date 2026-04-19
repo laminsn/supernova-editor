@@ -21,6 +21,12 @@ export default async function handler(req, res) {
     posthog:    {key: 'POSTHOG_API_KEY',    ok: has('POSTHOG_API_KEY'),    used_for: 'Product analytics'},
     ghl:        {key: 'GHL_PIT',            ok: has('GHL_PIT'),            used_for: 'GoHighLevel CRM sync'},
     n8n:        {key: 'N8N_WEBHOOK_BASE',   ok: has('N8N_WEBHOOK_BASE'),   used_for: 'Workflow webhooks, custom automation'},
+    pexels:     {key: 'PEXELS_API_KEY',     ok: has('PEXELS_API_KEY'),     used_for: 'Stock images + stock video (free, commercial OK)'},
+    pixabay:    {key: 'PIXABAY_API_KEY',    ok: has('PIXABAY_API_KEY'),    used_for: 'Royalty-free music + sound effects + video fallback'},
+    freesound:  {key: 'FREESOUND_API_KEY',  ok: has('FREESOUND_API_KEY'),  used_for: 'Sound effects (Creative Commons)'},
+    giphy:      {key: 'GIPHY_API_KEY',      ok: has('GIPHY_API_KEY'),      used_for: 'GIF library (primary)'},
+    tenor:      {key: 'TENOR_API_KEY',      ok: has('TENOR_API_KEY'),      used_for: 'GIF library (Google fallback)'},
+    unsplash:   {key: 'UNSPLASH_ACCESS_KEY',ok: has('UNSPLASH_ACCESS_KEY'),used_for: 'Stock image fallback'},
   };
 
   const ready = Object.values(integrations).filter(i => i.ok).length;

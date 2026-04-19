@@ -2,6 +2,8 @@
 
 What's required to take this from a single-tenant tool to a "plug in and ship" enterprise platform. Everything below is **scoped to what an enterprise customer would expect on day one** — not a wish list.
 
+> **Integration philosophy:** users connect at most 4 personal channels (custom email, Slack, Telegram, WhatsApp). Everything else — AI, image gen, stock libraries, transcription — runs on Supernova's master account and is bundled into the subscription. See [INTEGRATIONS.md](./INTEGRATIONS.md) for the full breakdown.
+
 ## Status Legend
 - ✅ **Live** — shipped, working in production
 - 🟡 **Partial** — scaffolding exists, needs hardening
@@ -45,7 +47,9 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 | Brain Score (heuristic v0) | ✅ | `/api/brain-score` | In-house |
 | Script edit / rewrite | ✅ | `/api/edit-script` | Anthropic — 16 presets |
 | Image generation | ✅ | `/api/generate-image` | Ideogram v3 |
-| Auto-captions | 🔴 | `/api/transcribe` (planned) | Deepgram |
+| Translation (batch fan-out) | ✅ | `/api/translate` | Anthropic |
+| Asset library (image/video/music/SFX/GIF) | ✅ | `/api/asset-library` | Pexels + Pixabay + Freesound + GIPHY + Tenor |
+| Auto-captions | 🟡 | `/api/transcribe` (stub in auto-edit) | Deepgram |
 | AI voice-over (multilingual) | 🔴 | `/api/synthesize` (planned) | ElevenLabs |
 | Brain Score v1 (trained) | 🔴 | After 500 labeled pairs | XGBoost on `training_pairs` view |
 | Multi-modal Brain Score v2 | 🔴 | After 5K pairs | CLIP + Whisper embeddings |
@@ -160,20 +164,31 @@ Everything else is post-revenue.
 ## Required Environment Variables (Vercel Project Settings)
 
 ```
-ANTHROPIC_API_KEY     (Live ✅)
-IDEOGRAM_API_KEY      (set this to enable image generation)
-RESEND_API_KEY        (Live ✅)
-RESEND_FROM           (e.g., "Supernova Editor <hello@yourdomain.com>")
-DEEPGRAM_API_KEY      (when wiring captions)
-ELEVENLABS_API_KEY    (when wiring AI voice)
-STRIPE_SECRET_KEY     (when wiring billing)
-STRIPE_WEBHOOK_SECRET (when wiring billing)
-TWILIO_AUTH_TOKEN     (when wiring SMS)
-TWILIO_ACCOUNT_SID    (when wiring SMS)
-SENTRY_DSN            (when wiring monitoring)
-POSTHOG_API_KEY       (when wiring analytics)
-GHL_PIT               (when wiring GoHighLevel)
-N8N_WEBHOOK_BASE      (when wiring custom workflows)
+# Live ✅
+ANTHROPIC_API_KEY        # AI everywhere
+RESEND_API_KEY           # email (default sender)
+RESEND_FROM              # e.g. "Supernova Editor <hello@yourdomain.com>"
+
+# Asset stack (set to unlock images / video / music / SFX / GIFs)
+IDEOGRAM_API_KEY         # AI image generation
+PEXELS_API_KEY           # stock photos + stock video
+PIXABAY_API_KEY          # royalty-free music + SFX + video fallback
+FREESOUND_API_KEY        # SFX (Creative Commons)
+GIPHY_API_KEY            # GIF library
+TENOR_API_KEY            # GIF fallback (Google)
+UNSPLASH_ACCESS_KEY      # stock photo fallback
+
+# Future capability
+DEEPGRAM_API_KEY         # auto-captions on uploaded recordings
+ELEVENLABS_API_KEY       # AI voiceover for translations
+STRIPE_SECRET_KEY        # billing (when revenue features go live)
+STRIPE_WEBHOOK_SECRET    # billing webhook
+TWILIO_AUTH_TOKEN        # SMS (A2P 10DLC)
+TWILIO_ACCOUNT_SID       # SMS
+SENTRY_DSN               # error monitoring
+POSTHOG_API_KEY          # product analytics
+GHL_PIT                  # GoHighLevel CRM
+N8N_WEBHOOK_BASE         # custom workflow webhooks
 ```
 
 Fetch live status anytime via `GET /api/health`.
