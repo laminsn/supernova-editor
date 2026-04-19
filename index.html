@@ -1320,7 +1320,9 @@ function Sidebar() {
     {key:'hashtags',label:'Hashtag Intel',icon:Icons.search},
     {key:'analytics',label:'Analytics',icon:Icons.chart},
     {key:'spy',label:'Competitor Spy',icon:Icons.eye},
-    {key:'collaboration',label:'Collaboration',icon:Icons.users,badge:'NEW'},
+    {key:'collaboration',label:'Collaboration',icon:Icons.users},
+    {key:'screenrec',label:'Screen Record',icon:Icons.video,badge:'NEW'},
+    {key:'comments',label:'Comment Monitor',icon:Icons.bell,badge:'NEW'},
     {key:'email',label:'Email Studio',icon:Icons.mail},
     {key:'settings',label:'Settings',icon:Icons.gear},
   ];
@@ -4297,6 +4299,537 @@ function CampaignModal({camp, collaborators, onSave, onClose}) {
   );
 }
 
+/* ============================================================
+   SCREEN RECORD STUDIO — real MediaRecorder + multi-screen
+   ============================================================ */
+function ScreenRecordView() {
+  const {addToast} = useApp();
+  const [screens, setScreens] = useState([]);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [recordedChunks, setRecordedChunks] = useState([]);
+  const [recordedUrl, setRecordedUrl] = useState(null);
+  const [duration, setDuration] = useState(0);
+  const [layout, setLayout] = useState('single'); // single, split, triple, pip
+  const [includeMic, setIncludeMic] = useState(true);
+  const [includeCamera, setIncludeCamera] = useState(true);
+  const [includeSystemAudio, setIncludeSystemAudio] = useState(true);
+  const [prompterOn, setPrompterOn] = useState(false);
+  const [prompterScript, setPrompterScript] = useState(`Most people think AI automation is about saving time.\nIt's actually about making decisions you didn't know you were missing.\n\nHere's what changed when I deployed my first AI agent...\n\nDecision Velocity. The Invisible Bottleneck. Compound Intelligence.\n\nYou don't need AI to do your job faster.\nYou need AI to do the job you didn't know existed.\n\nComment "DECISIONS" and I'll send you the full framework.`);
+  const [prompterPos, setPrompterPos] = useState({x: 60, y: 60});
+  const [prompterOpacity, setPrompterOpacity] = useState(0.85);
+  const [prompterFontSize, setPrompterFontSize] = useState(22);
+  const [prompterScrollSpeed, setPrompterScrollSpeed] = useState(0);
+  const [prompterScrollPos, setPrompterScrollPos] = useState(0);
+  const recorderRef = useRef(null);
+  const canvasRef = useRef(null);
+  const timerRef = useRef(null);
+  const prompterScrollRef = useRef(null);
+
+  const isMobile = /iPad|iPhone|iPod|Android/i.test(navigator.userAgent);
+  const supportsScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+  // Add a screen source
+  const addScreen = async () => {
+    if (screens.length >= 3) { addToast('Maximum 3 screens supported','info'); return; }
+    if (!supportsScreen) { addToast('Screen capture not supported on this device. Use desktop browser or iOS Control Center.','error'); return; }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {frameRate: {ideal: 30, max: 60}},
+        audio: includeSystemAudio
+      });
+      const id = Date.now();
+      setScreens(prev => [...prev, {id, stream, label: `Screen ${prev.length+1}`}]);
+      // Auto-stop handler
+      stream.getVideoTracks()[0].addEventListener('ended', () => {
+        setScreens(prev => prev.filter(s => s.id !== id));
+      });
+      addToast(`Screen ${screens.length+1} added`,'success');
+      // Auto-update layout
+      const newCount = screens.length + 1;
+      if (newCount === 2) setLayout('split');
+      else if (newCount === 3) setLayout('triple');
+      else if (newCount === 1) setLayout('single');
+    } catch(e) {
+      if (e.name !== 'NotAllowedError') addToast('Screen capture failed: '+e.message,'error');
+    }
+  };
+
+  const removeScreen = (id) => {
+    setScreens(prev => {
+      const s = prev.find(x => x.id === id);
+      if (s) s.stream.getTracks().forEach(t => t.stop());
+      const next = prev.filter(x => x.id !== id);
+      if (next.length === 1) setLayout('single');
+      else if (next.length === 2) setLayout('split');
+      return next;
+    });
+  };
+
+  const toggleCamera = async () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      setCameraStream(null);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {width: 640, height: 480, facingMode: 'user'},
+        audio: false
+      });
+      setCameraStream(stream);
+      addToast('Camera ready','success');
+    } catch(e) {
+      addToast('Camera access denied','error');
+    }
+  };
+
+  // Compose all sources onto a canvas for recording
+  const composeAndRecord = async () => {
+    if (screens.length === 0) { addToast('Add at least one screen first','error'); return; }
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    canvas.width = 1920;
+    canvas.height = 1080;
+
+    // Create video elements for each screen
+    const videos = screens.map(s => {
+      const v = document.createElement('video');
+      v.srcObject = s.stream;
+      v.muted = true;
+      v.play();
+      return v;
+    });
+    let cameraVideo = null;
+    if (cameraStream && includeCamera) {
+      cameraVideo = document.createElement('video');
+      cameraVideo.srcObject = cameraStream;
+      cameraVideo.muted = true;
+      cameraVideo.play();
+    }
+
+    // Wait for videos to be ready
+    await new Promise(r => setTimeout(r, 500));
+
+    // Draw loop
+    let stopDraw = false;
+    const draw = () => {
+      if (stopDraw) return;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (layout === 'single' || screens.length === 1) {
+        ctx.drawImage(videos[0], 0, 0, canvas.width, canvas.height);
+      } else if (layout === 'split' && screens.length >= 2) {
+        const w = canvas.width / 2;
+        ctx.drawImage(videos[0], 0, 0, w, canvas.height);
+        ctx.drawImage(videos[1], w, 0, w, canvas.height);
+        ctx.fillStyle = '#FFD60A';
+        ctx.fillRect(w-1, 0, 2, canvas.height);
+      } else if (layout === 'triple' && screens.length >= 3) {
+        const w = canvas.width / 2;
+        const h = canvas.height / 2;
+        ctx.drawImage(videos[0], 0, 0, w, h);
+        ctx.drawImage(videos[1], w, 0, w, h);
+        ctx.drawImage(videos[2], 0, h, canvas.width, h);
+      } else if (layout === 'pip') {
+        ctx.drawImage(videos[0], 0, 0, canvas.width, canvas.height);
+      }
+
+      // PiP camera overlay
+      if (cameraVideo && includeCamera) {
+        const camW = 280, camH = 210;
+        const camX = canvas.width - camW - 32;
+        const camY = canvas.height - camH - 32;
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(camX, camY, camW, camH, 16);
+        ctx.clip();
+        ctx.drawImage(cameraVideo, camX, camY, camW, camH);
+        ctx.restore();
+        // Yellow border
+        ctx.strokeStyle = '#FFD60A';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.roundRect(camX, camY, camW, camH, 16);
+        ctx.stroke();
+      }
+
+      requestAnimationFrame(draw);
+    };
+    draw();
+
+    // Build combined audio stream
+    const audioTracks = [];
+    if (includeMic) {
+      try {
+        const micStream = await navigator.mediaDevices.getUserMedia({audio: true});
+        audioTracks.push(...micStream.getAudioTracks());
+      } catch(e) { console.warn('mic denied'); }
+    }
+    if (includeSystemAudio) {
+      screens.forEach(s => audioTracks.push(...s.stream.getAudioTracks()));
+    }
+
+    const canvasStream = canvas.captureStream(30);
+    const finalStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioTracks
+    ]);
+
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+    const recorder = new MediaRecorder(finalStream, {mimeType, videoBitsPerSecond: 5000000});
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      stopDraw = true;
+      const blob = new Blob(chunks, {type: 'video/webm'});
+      setRecordedChunks(chunks);
+      setRecordedUrl(URL.createObjectURL(blob));
+      addToast('Recording complete! Click Download to save.','success');
+    };
+    recorder.start(1000);
+    recorderRef.current = recorder;
+    setRecording(true);
+    setDuration(0);
+    timerRef.current = setInterval(() => setDuration(d => d+1), 1000);
+  };
+
+  const stopRecording = () => {
+    if (recorderRef.current && recorderRef.current.state === 'recording') {
+      recorderRef.current.stop();
+      recorderRef.current.stream.getTracks().forEach(t => t.stop());
+    }
+    setRecording(false);
+    clearInterval(timerRef.current);
+  };
+
+  const downloadRecording = () => {
+    if (!recordedUrl) return;
+    const a = document.createElement('a');
+    a.href = recordedUrl;
+    a.download = `supernova-recording-${Date.now()}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Auto-scroll teleprompter
+  useEffect(() => {
+    if (!prompterOn || prompterScrollSpeed === 0) return;
+    const id = setInterval(() => {
+      setPrompterScrollPos(p => p + prompterScrollSpeed * 0.5);
+    }, 50);
+    return () => clearInterval(id);
+  }, [prompterOn, prompterScrollSpeed]);
+
+  // Cleanup
+  useEffect(() => () => {
+    screens.forEach(s => s.stream.getTracks().forEach(t => t.stop()));
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+  }, []);
+
+  const fmtTime = (s) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Screen Record Studio</h1>
+          <div className="sub">{recording ? <span style={{color:'var(--red)'}}>● RECORDING — {fmtTime(duration)}</span> : 'Multi-screen capture with live teleprompter overlay'}</div>
+        </div>
+        <div style={{display:'flex',gap:'.5rem'}}>
+          {!recording && screens.length > 0 && <button className="btn btn-primary" onClick={composeAndRecord} style={{background:'var(--red)',color:'#fff'}}>● Start Recording</button>}
+          {recording && <button className="btn btn-primary" onClick={stopRecording}>■ Stop</button>}
+          {recordedUrl && !recording && <button className="btn btn-primary" onClick={downloadRecording}>{Icons.download} Download</button>}
+        </div>
+      </div>
+
+      {isMobile && (
+        <div className="card" style={{borderColor:'var(--amber)',background:'rgba(255,140,0,0.05)',marginBottom:'1.25rem'}}>
+          <div style={{fontWeight:700,color:'var(--amber)',marginBottom:'.35rem'}}>📱 Mobile Note</div>
+          <div style={{fontSize:'.85rem',color:'var(--text-muted)',lineHeight:1.6}}>iOS doesn't allow in-browser screen capture. Use Control Center → Screen Recording, then upload the .mov to Editor for teleprompter overlay editing. Android Chrome supports getDisplayMedia for tab/window capture only.</div>
+        </div>
+      )}
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 360px',gap:'1.25rem'}}>
+        {/* MAIN: Live preview + recorded playback */}
+        <div>
+          <div className="card" style={{padding:0,overflow:'hidden',marginBottom:'1rem',position:'relative'}}>
+            <div style={{aspectRatio:'16/9',background:'#000',position:'relative',overflow:'hidden'}}>
+              {/* Live preview tiles */}
+              {screens.length === 0 && !recordedUrl && (
+                <div style={{position:'absolute',inset:0,display:'grid',placeItems:'center',color:'var(--text-dim)',textAlign:'center'}}>
+                  <div>
+                    <div style={{fontSize:'3rem',opacity:.3,marginBottom:'.75rem'}}>🖥️</div>
+                    <div style={{fontFamily:'var(--display)',fontSize:'1.2rem',fontWeight:700,marginBottom:'.25rem'}}>No screens captured</div>
+                    <div style={{fontFamily:'var(--mono)',fontSize:'.78rem'}}>Click "+ Add Screen" to begin</div>
+                  </div>
+                </div>
+              )}
+              <div style={{position:'absolute',inset:0,display:'grid',gridTemplateColumns: layout==='split'?'1fr 1fr' : layout==='triple'?'1fr 1fr':'1fr', gridTemplateRows: layout==='triple'?'1fr 1fr':'1fr', gap:2}}>
+                {screens.map((s, i) => (
+                  <div key={s.id} style={{background:'#111',position:'relative',gridColumn: layout==='triple'&&i===2?'1 / span 2':undefined}}>
+                    <video ref={el => {if(el && el.srcObject !== s.stream){el.srcObject=s.stream;el.play();}}} autoPlay muted style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                    <div style={{position:'absolute',top:8,left:8,padding:'.25rem .5rem',background:'rgba(0,0,0,.7)',borderRadius:4,fontFamily:'var(--mono)',fontSize:'.65rem',color:'#fff',backdropFilter:'blur(4px)'}}>{s.label}</div>
+                    <button onClick={() => removeScreen(s.id)} style={{position:'absolute',top:8,right:8,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,.7)',color:'#fff',border:'none',cursor:'pointer',display:'grid',placeItems:'center',fontSize:'.7rem'}}>x</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* PiP Camera overlay */}
+              {cameraStream && includeCamera && (
+                <div style={{position:'absolute',bottom:24,right:24,width:200,height:150,borderRadius:12,overflow:'hidden',border:'3px solid var(--yellow)',boxShadow:'var(--glow-md)',zIndex:5}}>
+                  <video ref={el => {if(el && el.srcObject !== cameraStream){el.srcObject=cameraStream;el.play();}}} autoPlay muted playsInline style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                </div>
+              )}
+
+              {/* Floating Teleprompter */}
+              {prompterOn && (
+                <div style={{position:'absolute',left:prompterPos.x,top:prompterPos.y,width:480,maxHeight:280,padding:'1rem 1.25rem',background:`rgba(0,0,0,${prompterOpacity})`,backdropFilter:'blur(8px)',borderRadius:12,border:'1px solid rgba(255,214,10,0.3)',color:'#fff',cursor:'move',overflow:'hidden',zIndex:6}} draggable onDragEnd={(e) => { if (e.clientX > 0) setPrompterPos({x: e.clientX - 100, y: e.clientY - 30}); }}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem',paddingBottom:'.4rem',borderBottom:'1px solid rgba(255,214,10,0.2)'}}>
+                    <span style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--yellow)',letterSpacing:'.1em'}}>● TELEPROMPTER</span>
+                    <button onClick={() => setPrompterOn(false)} style={{background:'none',border:'none',color:'rgba(255,255,255,0.6)',cursor:'pointer',fontSize:'.85rem'}}>×</button>
+                  </div>
+                  <div ref={prompterScrollRef} style={{maxHeight:200,overflow:'hidden',fontSize:prompterFontSize,lineHeight:1.5,fontFamily:'var(--body)'}}>
+                    <div style={{transform:`translateY(-${prompterScrollPos}px)`,transition: prompterScrollSpeed > 0 ? 'transform .5s linear' : 'none',whiteSpace:'pre-wrap'}}>{prompterScript}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Recorded playback */}
+            {recordedUrl && !recording && (
+              <div style={{padding:'1rem',borderTop:'1px solid var(--border)',background:'var(--glass)'}}>
+                <div style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--green)',marginBottom:'.5rem',letterSpacing:'.1em'}}>● RECORDING SAVED</div>
+                <video src={recordedUrl} controls style={{width:'100%',maxHeight:300,borderRadius:8,background:'#000'}}></video>
+              </div>
+            )}
+          </div>
+
+          {/* Hidden composition canvas */}
+          <canvas ref={canvasRef} style={{display:'none'}}></canvas>
+
+          {/* Layout selector */}
+          <div className="card">
+            <div className="card-head"><h3>Layout</h3><span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)'}}>{screens.length}/3 screens</span></div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'.5rem'}}>
+              {[
+                {k:'single',l:'Single',d:'1 screen'},
+                {k:'split',l:'Split',d:'2 side-by-side'},
+                {k:'triple',l:'Triple',d:'2 top + 1 bottom'},
+                {k:'pip',l:'PiP',d:'Screen + camera bubble'},
+              ].map(opt => (
+                <button key={opt.k} onClick={() => setLayout(opt.k)} className={`btn btn-sm ${layout===opt.k?'btn-primary':'btn-ghost'}`} style={{flexDirection:'column',gap:'.15rem',padding:'.65rem'}}>
+                  <span>{opt.l}</span>
+                  <span style={{fontFamily:'var(--mono)',fontSize:'.6rem',opacity:.7}}>{opt.d}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* CONTROLS */}
+        <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+          <div className="card">
+            <div className="card-head"><h3>Sources</h3></div>
+            <button className="btn btn-primary" style={{width:'100%',marginBottom:'.5rem'}} onClick={addScreen} disabled={recording || screens.length >= 3}>+ Add Screen ({screens.length}/3)</button>
+            <button className={`btn btn-sm ${cameraStream?'btn-primary':'btn-ghost'}`} style={{width:'100%',marginBottom:'.5rem'}} onClick={toggleCamera} disabled={recording}>
+              {cameraStream ? '✓ Camera ON' : '+ Add Camera'}
+            </button>
+            <label style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem .65rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.35rem',cursor:'pointer',fontSize:'.82rem'}}>
+              <input type="checkbox" checked={includeMic} onChange={e=>setIncludeMic(e.target.checked)} style={{accentColor:'var(--yellow)'}} />
+              🎤 Microphone audio
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem .65rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.35rem',cursor:'pointer',fontSize:'.82rem'}}>
+              <input type="checkbox" checked={includeSystemAudio} onChange={e=>setIncludeSystemAudio(e.target.checked)} style={{accentColor:'var(--yellow)'}} />
+              🔊 System audio (Chrome/Edge only)
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem .65rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',cursor:'pointer',fontSize:'.82rem'}}>
+              <input type="checkbox" checked={includeCamera} onChange={e=>setIncludeCamera(e.target.checked)} style={{accentColor:'var(--yellow)'}} />
+              📹 Burn camera into video
+            </label>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Teleprompter</h3>
+              <button className={`btn btn-sm ${prompterOn?'btn-primary':'btn-ghost'}`} onClick={() => setPrompterOn(!prompterOn)}>{prompterOn ? 'ON' : 'OFF'}</button>
+            </div>
+            {prompterOn && (
+              <>
+                <label className="field"><span className="lbl">Script</span><textarea className="input" value={prompterScript} onChange={e => setPrompterScript(e.target.value)} style={{minHeight:120,fontFamily:'var(--body)',fontSize:'.85rem',resize:'vertical'}} /></label>
+                <label className="field"><span className="lbl">Font: {prompterFontSize}px</span>
+                  <input type="range" min="14" max="48" value={prompterFontSize} onChange={e => setPrompterFontSize(+e.target.value)} style={{width:'100%',accentColor:'var(--yellow)'}} />
+                </label>
+                <label className="field"><span className="lbl">Opacity: {Math.round(prompterOpacity*100)}%</span>
+                  <input type="range" min="0.3" max="1" step="0.05" value={prompterOpacity} onChange={e => setPrompterOpacity(+e.target.value)} style={{width:'100%',accentColor:'var(--yellow)'}} />
+                </label>
+                <label className="field"><span className="lbl">Auto-scroll: {prompterScrollSpeed}x</span>
+                  <input type="range" min="0" max="5" step="0.5" value={prompterScrollSpeed} onChange={e => setPrompterScrollSpeed(+e.target.value)} style={{width:'100%',accentColor:'var(--yellow)'}} />
+                </label>
+                <button className="btn btn-ghost btn-sm" style={{width:'100%'}} onClick={() => setPrompterScrollPos(0)}>Reset Scroll</button>
+                <div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)',marginTop:'.5rem',padding:'.5rem',background:'var(--glass)',borderRadius:'var(--radius)'}}>
+                  💡 The teleprompter is part of the recording. For an OFF-recording prompter, open this app on a 2nd monitor, drag prompter there, then capture only the 1st monitor.
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Quality & Format</h3></div>
+            <label className="field"><span className="lbl">Resolution</span>
+              <select className="input" defaultValue="1080p">
+                <option value="720p">720p HD</option>
+                <option value="1080p">1080p Full HD</option>
+                <option value="1440p">1440p 2K</option>
+                <option value="2160p">2160p 4K</option>
+              </select>
+            </label>
+            <label className="field"><span className="lbl">Format</span>
+              <select className="input" defaultValue="webm">
+                <option value="webm">WebM (VP9 + Opus) — universal</option>
+                <option value="mp4" disabled>MP4 (coming soon)</option>
+              </select>
+            </label>
+            <label className="field"><span className="lbl">Frame Rate</span>
+              <select className="input" defaultValue="30">
+                <option value="24">24 fps (cinematic)</option>
+                <option value="30">30 fps (standard)</option>
+                <option value="60">60 fps (smooth)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   COMMENT MONITOR — Auto-moderate comments across platforms
+   ============================================================ */
+function CommentMonitorView() {
+  const {addToast} = useApp();
+  const [filterRules, setFilterRules] = useState([
+    {id:1, type:'hide', match:'sentiment', value:'negative', enabled:true},
+    {id:2, type:'hide', match:'keyword', value:'spam, scam, fake', enabled:true},
+    {id:3, type:'flag', match:'keyword', value:'refund, broken, terrible', enabled:true},
+    {id:4, type:'reply', match:'keyword', value:'price, cost, how much', enabled:false, reply:'Thanks for asking! DM me for current pricing 💛'},
+  ]);
+  const [autoMode, setAutoMode] = useState(true);
+  const [recentComments] = useState([
+    {id:1, platform:'ig', user:'@haterX', text:'this is garbage spam', sentiment:'negative', action:'hidden', time:'2m ago'},
+    {id:2, platform:'fb', user:'Tom B.', text:'Love this! Where can I learn more?', sentiment:'positive', action:'liked', time:'15m ago'},
+    {id:3, platform:'yt', user:'@curiousmind', text:'How much does it cost?', sentiment:'neutral', action:'auto-replied', time:'1h ago'},
+    {id:4, platform:'ig', user:'@scammer99', text:'Click my link for free crypto!!!', sentiment:'spam', action:'hidden + reported', time:'2h ago'},
+    {id:5, platform:'tt', user:'@realuser', text:'This actually works, thank you 🔥', sentiment:'positive', action:'pinned', time:'3h ago'},
+    {id:6, platform:'fb', user:'Mike R.', text:'You are a fraud and a scam', sentiment:'negative', action:'hidden', time:'5h ago'},
+  ]);
+
+  const platforms = [
+    {key:'fb', name:'Facebook', icon:'📘', supported:true, perm:'pages_manage_engagement', desc:'Hide/delete comments on Pages you admin', status:'available'},
+    {key:'ig', name:'Instagram', icon:'📷', supported:true, perm:'instagram_manage_comments', desc:'Hide comments on Business/Creator accounts (linked to FB Page)', status:'available'},
+    {key:'yt', name:'YouTube', icon:'▶️', supported:true, perm:'youtube.force-ssl', desc:'Set comments to held/rejected on owned channels', status:'available'},
+    {key:'tt', name:'TikTok', icon:'🎵', supported:false, perm:'TikTok Business API', desc:'Limited — requires TikTok for Business advertiser account', status:'limited'},
+    {key:'li', name:'LinkedIn', icon:'💼', supported:true, perm:'w_organization_social', desc:'Manage comments on Company Pages you admin', status:'available'},
+    {key:'x', name:'X / Twitter', icon:'𝕏', supported:false, perm:'X API v2 Pro tier', desc:'Requires paid X API access ($100+/mo)', status:'paid'},
+  ];
+
+  const sentimentColor = (s) => s==='positive'?'var(--green)':s==='negative'?'var(--red)':s==='spam'?'var(--magenta)':'var(--text-dim)';
+  const actionColor = (a) => a.includes('hidden')?'var(--red)':a.includes('liked')?'var(--green)':a.includes('replied')?'var(--blue)':a.includes('pinned')?'var(--yellow)':'var(--text-dim)';
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div><h1>Comment Monitor</h1><div className="sub">Auto-moderate comments across your connected accounts. Hide negativity, reply to questions, flag spam.</div></div>
+        <div style={{display:'flex',gap:'.5rem',alignItems:'center'}}>
+          <label style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem .85rem',background:autoMode?'rgba(0,230,138,0.1)':'var(--glass)',border:'1px solid '+(autoMode?'rgba(0,230,138,0.3)':'var(--border)'),borderRadius:'var(--radius-lg)',cursor:'pointer'}}>
+            <input type="checkbox" checked={autoMode} onChange={e=>setAutoMode(e.target.checked)} style={{accentColor:'var(--green)'}} />
+            <span style={{fontWeight:600,fontSize:'.85rem'}}>Auto-mod {autoMode?'ON':'OFF'}</span>
+          </label>
+          <button className="btn btn-primary btn-sm" onClick={() => addToast('Refreshed: 4 new comments processed','success')}>Refresh Now</button>
+        </div>
+      </div>
+
+      <div className="stats-grid" style={{marginBottom:'1.25rem'}}>
+        <div className="stat-card"><div className="label">Hidden Today</div><div className="value">12</div><div className="delta">Across 3 platforms</div></div>
+        <div className="stat-card"><div className="label">Auto-Replied</div><div className="value">7</div><div className="delta">Avg response: 2 min</div></div>
+        <div className="stat-card"><div className="label">Flagged for Review</div><div className="value">3</div><div className="delta down">Needs your attention</div></div>
+        <div className="stat-card"><div className="label">Sentiment Score</div><div className="value">+87</div><div className="delta">Mostly positive</div></div>
+      </div>
+
+      <div className="grid-2" style={{gridTemplateColumns:'1.5fr 1fr'}}>
+        {/* RECENT COMMENTS */}
+        <div className="card">
+          <div className="card-head"><h3>Recent Comments</h3><span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)'}}>Last 24h</span></div>
+          <div style={{display:'flex',flexDirection:'column',gap:'.5rem'}}>
+            {recentComments.map(c => (
+              <div key={c.id} style={{padding:'.75rem 1rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)',borderLeft:`3px solid ${sentimentColor(c.sentiment)}`}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.4rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                    <span className={`platform-badge ${c.platform}`} style={{fontSize:'.6rem',padding:'.1rem .35rem'}}>{c.platform.toUpperCase()}</span>
+                    <span style={{fontWeight:600,fontSize:'.82rem'}}>{c.user}</span>
+                    <span style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)'}}>{c.time}</span>
+                  </div>
+                  <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',padding:'.15rem .45rem',background:`color-mix(in srgb, ${actionColor(c.action)} 15%, transparent)`,color:actionColor(c.action),borderRadius:999,textTransform:'uppercase',letterSpacing:'.05em'}}>{c.action}</span>
+                </div>
+                <div style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:'.35rem'}}>"{c.text}"</div>
+                <div style={{display:'flex',gap:'.35rem',flexWrap:'wrap'}}>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} onClick={() => addToast(`Comment from ${c.user} unhidden`,'info')}>Undo</button>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} onClick={() => addToast(`Replied to ${c.user}`,'success')}>Reply</button>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem',color:'var(--red)'}} onClick={() => addToast(`Comment deleted permanently`,'error')}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Connections + Rules */}
+        <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+          <div className="card">
+            <div className="card-head"><h3>Platform Connections</h3></div>
+            {platforms.map(p => (
+              <div key={p.key} style={{padding:'.75rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.5rem',border:'1px solid var(--glass-border)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.25rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                    <span style={{fontSize:'1.1rem'}}>{p.icon}</span>
+                    <span style={{fontWeight:700,fontSize:'.88rem'}}>{p.name}</span>
+                  </div>
+                  <button className={`btn btn-sm ${p.status==='available'?'btn-ghost':'btn-ghost'}`} disabled={!p.supported} style={{fontSize:'.7rem',padding:'.3rem .6rem',opacity:p.supported?1:.5}}>
+                    {p.status==='available'?'Connect':p.status==='limited'?'Limited':'Paid only'}
+                  </button>
+                </div>
+                <div style={{fontSize:'.72rem',color:'var(--text-dim)',marginBottom:'.25rem'}}>{p.desc}</div>
+                <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)'}}>Permission: {p.perm}</div>
+              </div>
+            ))}
+            <div style={{padding:'.6rem .75rem',background:'rgba(255,214,10,0.05)',border:'1px solid rgba(255,214,10,0.2)',borderRadius:'var(--radius-lg)',fontSize:'.75rem',color:'var(--text-muted)',marginTop:'.5rem'}}>
+              💡 OAuth integrations require Meta Developer app approval (~2-4 weeks). Once approved, click "Connect" to authorize. Until then, this view shows what auto-mod will do once live.
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Auto-Mod Rules</h3>
+              <button className="btn btn-ghost btn-sm" style={{fontSize:'.7rem',padding:'.25rem .5rem'}} onClick={() => addToast('Add rule modal coming','info')}>+ Add</button>
+            </div>
+            {filterRules.map(r => (
+              <div key={r.id} style={{padding:'.65rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.4rem',border:'1px solid var(--glass-border)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.3rem'}}>
+                  <span style={{fontFamily:'var(--mono)',fontSize:'.65rem',padding:'.15rem .4rem',background:r.type==='hide'?'rgba(255,59,92,0.15)':r.type==='reply'?'rgba(78,168,255,0.15)':'rgba(255,140,0,0.15)',color:r.type==='hide'?'var(--red)':r.type==='reply'?'var(--blue)':'var(--amber)',borderRadius:'var(--radius)',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:700}}>{r.type}</span>
+                  <input type="checkbox" checked={r.enabled} onChange={e => setFilterRules(prev => prev.map(x => x.id===r.id?{...x,enabled:e.target.checked}:x))} style={{accentColor:'var(--yellow)'}} />
+                </div>
+                <div style={{fontSize:'.78rem',marginBottom:'.2rem'}}>If <strong>{r.match}</strong> matches: <code style={{padding:'.1rem .3rem',background:'rgba(255,255,255,0.05)',borderRadius:3,fontSize:'.72rem'}}>{r.value}</code></div>
+                {r.reply && <div style={{fontSize:'.72rem',color:'var(--text-dim)',fontStyle:'italic'}}>Reply: "{r.reply}"</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ViewRouter() {
   const {view} = useApp();
   switch(view) {
@@ -4313,6 +4846,8 @@ function ViewRouter() {
     case 'analytics': return <AnalyticsView />;
     case 'spy': return <CompetitorSpyView />;
     case 'collaboration': return <CollaborationView />;
+    case 'screenrec': return <ScreenRecordView />;
+    case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
     case 'settings': return <SettingsView />;
     default: return <DashboardView />;
