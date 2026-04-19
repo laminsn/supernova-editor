@@ -2,6 +2,8 @@ node_modules/
 .env
 .env.local
 .env.production
+.credentials.local
+.credentials*.local
 .vercel
 .DS_Store
 *.log

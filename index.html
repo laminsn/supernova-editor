@@ -145,6 +145,9 @@ body::after{
 .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.25em;text-transform:uppercase;font-weight:500;color:var(--yellow)}
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.85rem 1.3rem;font-family:var(--body);font-weight:700;font-size:.9rem;border-radius:var(--radius);transition:all var(--transition);white-space:nowrap;border:1px solid transparent;position:relative;overflow:hidden}
+.btn svg{width:14px;height:14px;flex-shrink:0}
+.btn-lg svg{width:18px;height:18px}
+.btn-sm svg{width:12px;height:12px}
 .btn-primary{background:var(--gradient-warm);color:var(--ink);border:none;box-shadow:var(--glow-sm)}
 .btn-primary:hover{transform:translateY(-2px);box-shadow:var(--glow-xl);filter:brightness(1.1)}
 .btn-primary:active{transform:translateY(0)}
@@ -810,53 +813,61 @@ function useApp() { return useContext(AppContext); }
    ============================================================ */
 const SupabaseClient = (() => {
   let client = null;
+  let workspaceId = localStorage.getItem('eos-workspace-id') || null;
   return {
     init(url, anonKey) {
       if (!url || !anonKey || !window.supabase) return false;
-      try { client = window.supabase.createClient(url, anonKey); localStorage.setItem('eos-sb-url', url); localStorage.setItem('eos-sb-key', anonKey); return true; } catch(e) { return false; }
+      try { client = window.supabase.createClient(url, anonKey); localStorage.setItem('eos-sb-url', url); localStorage.setItem('eos-sb-key', anonKey); return true; } catch(e) { console.error('Supabase init:', e); return false; }
     },
     isReady() { return !!client; },
+    getClient() { return client; },
+    getWorkspaceId() { return workspaceId; },
+    setWorkspaceId(id) { workspaceId = id; if (id) localStorage.setItem('eos-workspace-id', id); else localStorage.removeItem('eos-workspace-id'); },
     async fetch(table, opts={}) {
       if (!client) return null;
       let q = client.from(table).select(opts.select || '*');
       if (opts.eq) Object.entries(opts.eq).forEach(([k,v]) => q = q.eq(k,v));
+      if (opts.in) Object.entries(opts.in).forEach(([k,v]) => q = q.in(k,v));
       if (opts.order) q = q.order(opts.order, {ascending: opts.ascending !== false});
       if (opts.limit) q = q.limit(opts.limit);
       const {data, error} = await q;
-      if (error) console.warn('Supabase fetch:', error.message);
+      if (error) { console.warn('Supabase fetch ['+table+']:', error.message); return null; }
       return data;
     },
     async insert(table, row) {
       if (!client) return null;
       const {data, error} = await client.from(table).insert(row).select();
-      if (error) console.warn('Supabase insert:', error.message);
+      if (error) { console.warn('Supabase insert ['+table+']:', error.message); return null; }
       return data;
     },
     async update(table, id, patch) {
       if (!client) return null;
       const {data, error} = await client.from(table).update(patch).eq('id', id).select();
-      if (error) console.warn('Supabase update:', error.message);
+      if (error) { console.warn('Supabase update ['+table+']:', error.message); return null; }
       return data;
     },
-    async signIn(email, password) {
-      if (!client) return null;
-      return await client.auth.signInWithPassword({email, password});
+    async delete(table, id) {
+      if (!client) return false;
+      const {error} = await client.from(table).delete().eq('id', id);
+      if (error) { console.warn('Supabase delete ['+table+']:', error.message); return false; }
+      return true;
     },
-    async signUp(email, password) {
+    async upsert(table, row, onConflict) {
       if (!client) return null;
-      return await client.auth.signUp({email, password});
+      const {data, error} = await client.from(table).upsert(row, onConflict ? {onConflict} : undefined).select();
+      if (error) { console.warn('Supabase upsert ['+table+']:', error.message); return null; }
+      return data;
     },
+    async signIn(email, password) { if (!client) return null; return await client.auth.signInWithPassword({email, password}); },
+    async signUp(email, password) { if (!client) return null; return await client.auth.signUp({email, password}); },
     async signOut() { if (client) await client.auth.signOut(); },
-    async getUser() {
-      if (!client) return null;
-      const {data} = await client.auth.getUser();
-      return data?.user || null;
-    },
+    async getUser() { if (!client) return null; const {data} = await client.auth.getUser(); return data?.user || null; },
   };
 })();
 
-// Auto-init from localStorage
+// Expose globally for React components and dev console
 if (typeof window !== 'undefined') {
+  window.SupabaseClient = SupabaseClient;
   const savedUrl = localStorage.getItem('eos-sb-url');
   const savedKey = localStorage.getItem('eos-sb-key');
   if (savedUrl && savedKey) SupabaseClient.init(savedUrl, savedKey);
@@ -3668,25 +3679,216 @@ function CollaborationView() {
   const {addToast} = useApp();
   const [collabTab, setCollabTab] = useState('directory');
   const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [editingCampaign, setEditingCampaign] = useState(null);
+  const [editingCollab, setEditingCollab] = useState(null);
   const [filterPlatform, setFilterPlatform] = useState('all');
   const [filterTier, setFilterTier] = useState('all');
   const [previewMode, setPreviewMode] = useState('desktop');
+  const [collaborators, setCollaborators] = useState(MOCK_COLLABORATORS);
+  const [campaigns, setCampaigns] = useState(MOCK_CAMPAIGNS);
+  const [packages, setPackages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [sendingPackages, setSendingPackages] = useState(false);
+  const [sendProgress, setSendProgress] = useState(0);
+  const [liveMode, setLiveMode] = useState(false);
 
   const tierColor = (t) => t==='Platinum'?'#E5E4E2':t==='Gold'?'#FFD700':t==='Silver'?'#C0C0C0':'#CD7F32';
 
-  const filtered = MOCK_COLLABORATORS.filter(c => {
+  // Load from Supabase if connected
+  useEffect(() => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) return;
+    setLiveMode(true);
+    setLoading(true);
+    (async () => {
+      const wsId = sb.getWorkspaceId();
+      const collabs = await sb.fetch('collaborators', wsId ? {eq:{workspace_id:wsId}, order:'created_at', ascending:false} : {order:'created_at', ascending:false});
+      const camps = await sb.fetch('campaigns', wsId ? {eq:{workspace_id:wsId}, order:'created_at', ascending:false} : {order:'created_at', ascending:false});
+      const pkgs = await sb.fetch('packages', wsId ? {eq:{workspace_id:wsId}, order:'sent_at', ascending:false} : {order:'sent_at', ascending:false});
+      // Map DB rows to our component shape
+      if (collabs && collabs.length) setCollaborators(collabs.map(c => ({
+        id: c.id, name: c.name, handle: c.handle, platform: c.platform || 'ig',
+        timezone: c.timezone || 'EST', tier: c.tier || 'Bronze', level: c.level || 'Influencer',
+        photo: (c.name||'?').charAt(0).toUpperCase(), email: c.email,
+        followers: c.followers || '0', engagement: c.engagement || 0, posts: c.posts_completed || 0,
+        lastActive: c.last_active ? new Date(c.last_active).toLocaleDateString() : 'Never',
+        status: c.status || 'active', tags: c.tags || []
+      })));
+      if (camps && camps.length) setCampaigns(camps.map(c => ({
+        id: c.id, name: c.name, status: c.status || 'draft',
+        collaborators: c.collaborator_ids || [], total: (c.collaborator_ids||[]).length,
+        sent: 0, posted: 0,
+        start: c.start_date ? new Date(c.start_date).toLocaleDateString('en',{month:'short',day:'numeric'}) : '',
+        end: c.end_date ? new Date(c.end_date).toLocaleDateString('en',{month:'short',day:'numeric'}) : '',
+        content_ids: c.content_ids || []
+      })));
+      if (pkgs) setPackages(pkgs);
+      setLoading(false);
+    })();
+  }, []);
+
+  const filtered = collaborators.filter(c => {
     if (filterPlatform !== 'all' && c.platform !== filterPlatform) return false;
     if (filterTier !== 'all' && c.tier.toLowerCase() !== filterTier) return false;
     return true;
   });
 
+  // CAMPAIGN CRUD
+  const saveCampaign = async (camp) => {
+    const sb = window.SupabaseClient;
+    const isNew = !camp.id || typeof camp.id === 'number';
+    if (sb && sb.isReady()) {
+      const wsId = sb.getWorkspaceId();
+      const payload = {
+        workspace_id: wsId,
+        name: camp.name,
+        status: camp.status || 'draft',
+        start_date: camp.start_date || null,
+        end_date: camp.end_date || null,
+        collaborator_ids: camp.collaborator_ids || [],
+        content_ids: camp.content_ids || [],
+      };
+      if (isNew) {
+        const res = await sb.insert('campaigns', payload);
+        if (res && res[0]) {
+          const newCamp = {id: res[0].id, name: res[0].name, status: res[0].status, collaborators: res[0].collaborator_ids||[], total: (res[0].collaborator_ids||[]).length, sent: 0, posted: 0, start: '', end: '', content_ids: res[0].content_ids||[]};
+          setCampaigns(prev => [newCamp, ...prev]);
+          setSelectedCampaign(newCamp);
+          addToast('Campaign saved to database!','success');
+        } else {
+          addToast('Save failed — check console','error');
+        }
+      } else {
+        const res = await sb.update('campaigns', camp.id, payload);
+        if (res) {
+          setCampaigns(prev => prev.map(c => c.id === camp.id ? {...c, ...camp, collaborators: camp.collaborator_ids||[], total: (camp.collaborator_ids||[]).length} : c));
+          addToast('Campaign updated!','success');
+        }
+      }
+    } else {
+      // Local-only mode
+      if (isNew) {
+        const newCamp = {...camp, id: Date.now(), collaborators: camp.collaborator_ids||[], total: (camp.collaborator_ids||[]).length, sent: 0, posted: 0};
+        setCampaigns(prev => [newCamp, ...prev]);
+        setSelectedCampaign(newCamp);
+      } else {
+        setCampaigns(prev => prev.map(c => c.id === camp.id ? {...c, ...camp, collaborators: camp.collaborator_ids||[]} : c));
+      }
+      addToast('Campaign saved locally (connect Supabase to persist)','info');
+    }
+    setEditingCampaign(null);
+  };
+
+  const deleteCampaign = async (id) => {
+    if (!confirm('Delete this campaign?')) return;
+    const sb = window.SupabaseClient;
+    if (sb && sb.isReady()) await sb.delete('campaigns', id);
+    setCampaigns(prev => prev.filter(c => c.id !== id));
+    if (selectedCampaign?.id === id) setSelectedCampaign(null);
+    addToast('Campaign deleted','info');
+  };
+
+  // BUILD & SEND PACKAGES
+  const buildAndSendPackages = async (camp) => {
+    if (!camp.collaborators || camp.collaborators.length === 0) {
+      addToast('Add at least one collaborator first','error');
+      return;
+    }
+    setSendingPackages(true);
+    setSendProgress(0);
+    const sb = window.SupabaseClient;
+    const wsId = sb && sb.isReady() ? sb.getWorkspaceId() : null;
+    const total = camp.collaborators.length;
+    const newPackages = [];
+    let sentCount = 0;
+
+    for (let i = 0; i < camp.collaborators.length; i++) {
+      const cid = camp.collaborators[i];
+      const col = collaborators.find(c => c.id === cid);
+      if (!col) continue;
+
+      // Generate package content
+      const platformHashtagCount = {ig: 30, tt: 5, yt: 15, li: 5, fb: 10}[col.platform] || 10;
+      const baseHashtags = ['aiautomation','aibusiness','contentcreator','aitools','smallbusiness','entrepreneurlife','aistrategy','contentmachine','automation','socialstrategy','contentcreation','aiagents','businessautomation','growthhacking','digitalmarketing','reelsinstagram','contentmarketing','techstartup','onlinebusiness','ailife','businesstips','marketingtips','viralcontent','socialmediatips','growthmindset','contentisking','aisolutions','buildwithAI','futureofwork','nocode'];
+      const hashtags = baseHashtags.slice(0, platformHashtagCount).map(h => '#' + h);
+
+      const optimalTime = {ig:'11:00 AM', tt:'7:00 PM', yt:'2:00 PM', li:'9:00 AM', fb:'1:00 PM'}[col.platform] || '12:00 PM';
+      const scheduledFor = new Date();
+      scheduledFor.setDate(scheduledFor.getDate() + i + 1);
+
+      const pkg = {
+        workspace_id: wsId,
+        campaign_id: typeof camp.id === 'string' ? camp.id : null,
+        collaborator_id: typeof cid === 'string' ? cid : null,
+        status: 'sent',
+        caption: `Most people think AI automation is about saving time.\n\nIt's actually about making decisions you didn't know you were missing.\n\nHere's what changed when I deployed my first AI agent...\n\nComment "DECISIONS" and I'll send you the full framework.\n\n${hashtags.slice(0,3).join(' ')}`,
+        hashtags: hashtags,
+        mentions: ['@LaminSNgobeh'],
+        scheduled_for: scheduledFor.toISOString(),
+        utm_link: `https://supernova.app/r/${camp.id}/${cid}?utm_source=${col.platform}&utm_medium=collab&utm_campaign=${encodeURIComponent(camp.name)}`,
+        sent_at: new Date().toISOString(),
+      };
+
+      // Save to Supabase
+      if (sb && sb.isReady() && wsId) {
+        const saved = await sb.insert('packages', pkg);
+        if (saved && saved[0]) {
+          newPackages.push(saved[0]);
+          sentCount++;
+        }
+      } else {
+        newPackages.push({...pkg, id: 'local-'+Date.now()+'-'+i});
+        sentCount++;
+      }
+
+      // Trigger email send via Vercel function
+      try {
+        const emailRes = await fetch('/api/send-package', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            to: col.email,
+            collaboratorName: col.name,
+            campaignName: camp.name,
+            postingTime: `${scheduledFor.toLocaleDateString('en',{weekday:'long',month:'long',day:'numeric'})} at ${optimalTime} ${col.timezone}`,
+            platform: col.platform,
+            caption: pkg.caption,
+            hashtags: pkg.hashtags.join(' '),
+            mentions: pkg.mentions.join(' '),
+            trackingUrl: pkg.utm_link,
+          })
+        });
+        if (emailRes.ok) addToast(`✓ Email sent to ${col.name}`,'success');
+        else if (emailRes.status === 404) addToast(`Package built for ${col.name} (email API not deployed)`,'info');
+        else { const err = await emailRes.text(); console.warn('email error:', err); }
+      } catch(e) {
+        console.warn('email fetch failed:', e);
+      }
+
+      setSendProgress(Math.round(((i+1)/total)*100));
+    }
+
+    setPackages(prev => [...newPackages, ...prev]);
+    // Update campaign sent count
+    setCampaigns(prev => prev.map(c => c.id === camp.id ? {...c, sent: sentCount, status: 'active'} : c));
+    if (sb && sb.isReady() && typeof camp.id === 'string') {
+      await sb.update('campaigns', camp.id, {status: 'active'});
+    }
+
+    setTimeout(() => { setSendingPackages(false); setSendProgress(0); }, 1500);
+    addToast(`${sentCount}/${total} packages sent successfully!`,'success');
+  };
+
   return (
     <div className="view-enter">
       <div className="view-head">
-        <div><h1>Collaboration</h1><div className="sub">Send turnkey content packages. Collaborators just copy, paste, and post.</div></div>
+        <div>
+          <h1>Collaboration {liveMode && <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',padding:'.2rem .5rem',background:'rgba(0,230,138,0.15)',color:'var(--green)',borderRadius:999,marginLeft:'.5rem',verticalAlign:'middle',letterSpacing:'.1em'}}>● LIVE</span>}</h1>
+          <div className="sub">Send turnkey content packages. Collaborators just copy, paste, and post.</div>
+        </div>
         <div style={{display:'flex',gap:'.5rem'}}>
-          <button className="btn btn-ghost btn-sm" onClick={() => addToast('Collaborator added!','success')}>{Icons.userPlus} Add Collaborator</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setCollabTab('builder')}>{Icons.send} New Campaign</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditingCollab({})}>{Icons.userPlus} Add Collaborator</button>
+          <button className="btn btn-primary btn-sm" onClick={() => setEditingCampaign({collaborator_ids:[],content_ids:[],status:'draft'})}>{Icons.send} New Campaign</button>
         </div>
       </div>
 
@@ -3696,14 +3898,54 @@ function CollaborationView() {
         ))}
       </div>
 
+      {/* COLLABORATOR EDIT MODAL */}
+      {editingCollab && <CollaboratorModal collab={editingCollab} onSave={async (data) => {
+        const sb = window.SupabaseClient;
+        const wsId = sb && sb.isReady() ? sb.getWorkspaceId() : null;
+        const isNew = !data.id;
+        const payload = {
+          workspace_id: wsId,
+          name: data.name, handle: data.handle, email: data.email,
+          platform: data.platform, timezone: data.timezone,
+          tier: data.tier, level: data.level,
+          followers: data.followers, engagement: parseFloat(data.engagement)||0,
+          status: data.status||'active', tags: data.tags||[]
+        };
+        if (sb && sb.isReady()) {
+          if (isNew) {
+            const res = await sb.insert('collaborators', payload);
+            if (res && res[0]) {
+              setCollaborators(prev => [{
+                id:res[0].id,name:res[0].name,handle:res[0].handle,platform:res[0].platform,
+                timezone:res[0].timezone,tier:res[0].tier,level:res[0].level,
+                photo:(res[0].name||'?').charAt(0).toUpperCase(),email:res[0].email,
+                followers:res[0].followers,engagement:res[0].engagement,posts:0,lastActive:'Just added',status:res[0].status,tags:res[0].tags||[]
+              }, ...prev]);
+              addToast('Collaborator saved!','success');
+            }
+          } else {
+            await sb.update('collaborators', data.id, payload);
+            setCollaborators(prev => prev.map(c => c.id===data.id?{...c,...data}:c));
+            addToast('Collaborator updated!','success');
+          }
+        } else {
+          if (isNew) setCollaborators(prev => [{...data, id:Date.now(), photo:(data.name||'?').charAt(0).toUpperCase(), posts:0, lastActive:'Just added'}, ...prev]);
+          else setCollaborators(prev => prev.map(c => c.id===data.id?{...c,...data}:c));
+        }
+        setEditingCollab(null);
+      }} onClose={() => setEditingCollab(null)} />}
+
+      {/* CAMPAIGN EDIT MODAL */}
+      {editingCampaign && <CampaignModal camp={editingCampaign} collaborators={collaborators} onSave={saveCampaign} onClose={() => setEditingCampaign(null)} />}
+
       {/* DIRECTORY */}
       {collabTab === 'directory' && (
         <>
           <div className="stats-grid" style={{marginBottom:'1.25rem'}}>
-            <div className="stat-card"><div className="label">Total Collaborators</div><div className="value">{MOCK_COLLABORATORS.length}</div><div className="delta">{MOCK_COLLABORATORS.filter(c=>c.status==='active').length} active</div></div>
-            <div className="stat-card"><div className="label">Avg Engagement</div><div className="value">{(MOCK_COLLABORATORS.reduce((s,c)=>s+c.engagement,0)/MOCK_COLLABORATORS.length).toFixed(1)}%</div><div className="delta">Above industry avg</div></div>
-            <div className="stat-card"><div className="label">Packages Sent</div><div className="value">{MOCK_COLLABORATORS.reduce((s,c)=>s+c.posts,0)}</div><div className="delta">Across all campaigns</div></div>
-            <div className="stat-card"><div className="label">Total Reach</div><div className="value">1.5M</div><div className="delta">Combined followers</div></div>
+            <div className="stat-card"><div className="label">Total Collaborators</div><div className="value">{collaborators.length}</div><div className="delta">{collaborators.filter(c=>c.status==='active').length} active</div></div>
+            <div className="stat-card"><div className="label">Avg Engagement</div><div className="value">{collaborators.length?(collaborators.reduce((s,c)=>s+(c.engagement||0),0)/collaborators.length).toFixed(1):'0'}%</div><div className="delta">Above industry avg</div></div>
+            <div className="stat-card"><div className="label">Packages Sent</div><div className="value">{packages.length || collaborators.reduce((s,c)=>s+(c.posts||0),0)}</div><div className="delta">{liveMode?'Live from DB':'Across all campaigns'}</div></div>
+            <div className="stat-card"><div className="label">Total Reach</div><div className="value">{(()=>{const total=collaborators.reduce((s,c)=>{const f=parseFloat((c.followers||'0').replace(/[KM]/g,''));const m=(c.followers||'').includes('M')?1000000:(c.followers||'').includes('K')?1000:1;return s+(f*m);},0);return total>1000000?(total/1000000).toFixed(1)+'M':total>1000?(total/1000).toFixed(0)+'K':total;})()}</div><div className="delta">Combined followers</div></div>
           </div>
 
           <div style={{display:'flex',gap:'.5rem',marginBottom:'1.25rem',flexWrap:'wrap'}}>
@@ -3717,37 +3959,39 @@ function CollaborationView() {
             </select>
           </div>
 
-          <div className="collab-grid">
-            {filtered.map(c => (
-              <div key={c.id} className="card" style={{padding:'1.25rem',borderLeft:`3px solid ${tierColor(c.tier)}`}}>
-                <div style={{display:'flex',gap:'1rem',marginBottom:'.75rem'}}>
-                  <div style={{width:48,height:48,borderRadius:'50%',background:`linear-gradient(135deg,${tierColor(c.tier)},rgba(255,255,255,0.1))`,display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'1.1rem',color:'var(--ink)',flexShrink:0}}>{c.photo}</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:700,fontSize:'.95rem'}}>{c.name}</div>
-                    <div style={{fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-muted)',display:'flex',gap:'.5rem',alignItems:'center'}}>
-                      {c.handle} <span className={`platform-badge ${c.platform}`} style={{fontSize:'.55rem',padding:'.1rem .3rem'}}>{c.platform.toUpperCase()}</span>
+          {loading ? <div style={{padding:'3rem',textAlign:'center',color:'var(--text-dim)'}}>Loading from database...</div> : (
+            <div className="collab-grid">
+              {filtered.map(c => (
+                <div key={c.id} className="card" style={{padding:'1.25rem',borderLeft:`3px solid ${tierColor(c.tier)}`}}>
+                  <div style={{display:'flex',gap:'1rem',marginBottom:'.75rem'}}>
+                    <div style={{width:48,height:48,borderRadius:'50%',background:`linear-gradient(135deg,${tierColor(c.tier)},rgba(255,255,255,0.1))`,display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'1.1rem',color:'var(--ink)',flexShrink:0}}>{c.photo}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:'.95rem'}}>{c.name}</div>
+                      <div style={{fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-muted)',display:'flex',gap:'.5rem',alignItems:'center'}}>
+                        {c.handle} <span className={`platform-badge ${c.platform}`} style={{fontSize:'.55rem',padding:'.1rem .3rem'}}>{c.platform.toUpperCase()}</span>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'flex-start',gap:'.3rem'}}>
+                      <span className={`tier-badge ${c.tier.toLowerCase()}`}>{c.tier}</span>
+                      <div style={{width:8,height:8,borderRadius:'50%',background:c.status==='active'?'var(--green)':'var(--amber)',boxShadow:`0 0 6px ${c.status==='active'?'var(--green)':'var(--amber)'}`}}></div>
                     </div>
                   </div>
-                  <div style={{display:'flex',alignItems:'flex-start',gap:'.3rem'}}>
-                    <span className={`tier-badge ${c.tier.toLowerCase()}`}>{c.tier}</span>
-                    <div style={{width:8,height:8,borderRadius:'50%',background:c.status==='active'?'var(--green)':'var(--amber)',boxShadow:`0 0 6px ${c.status==='active'?'var(--green)':'var(--amber)'}`}}></div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.5rem',marginBottom:'.75rem',textAlign:'center'}}>
+                    <div><div style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'1rem',color:'var(--text)'}}>{c.followers}</div><div style={{fontFamily:'var(--mono)',fontSize:'.58rem',color:'var(--text-dim)',textTransform:'uppercase'}}>Followers</div></div>
+                    <div><div style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'1rem',color:'var(--green)'}}>{c.engagement}%</div><div style={{fontFamily:'var(--mono)',fontSize:'.58rem',color:'var(--text-dim)',textTransform:'uppercase'}}>Eng Rate</div></div>
+                    <div><div style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'1rem',color:'var(--yellow)'}}>{c.posts}</div><div style={{fontFamily:'var(--mono)',fontSize:'.58rem',color:'var(--text-dim)',textTransform:'uppercase'}}>Posts</div></div>
+                  </div>
+                  <div style={{display:'flex',gap:'.3rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
+                    {(c.tags||[]).map(t => <span key={t} style={{padding:'.15rem .45rem',borderRadius:999,fontSize:'.65rem',fontFamily:'var(--mono)',background:'var(--glass)',border:'1px solid var(--border)',color:'var(--text-dim)'}}>{t}</span>)}
+                  </div>
+                  <div style={{display:'flex',gap:'.5rem'}}>
+                    <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={() => setEditingCampaign({collaborator_ids:[c.id],content_ids:[],status:'draft',name:`Send to ${c.name}`})}>{Icons.send} Send Package</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setEditingCollab(c)}>Edit</button>
                   </div>
                 </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.5rem',marginBottom:'.75rem',textAlign:'center'}}>
-                  <div><div style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'1rem',color:'var(--text)'}}>{c.followers}</div><div style={{fontFamily:'var(--mono)',fontSize:'.58rem',color:'var(--text-dim)',textTransform:'uppercase'}}>Followers</div></div>
-                  <div><div style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'1rem',color:'var(--green)'}}>{c.engagement}%</div><div style={{fontFamily:'var(--mono)',fontSize:'.58rem',color:'var(--text-dim)',textTransform:'uppercase'}}>Eng Rate</div></div>
-                  <div><div style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'1rem',color:'var(--yellow)'}}>{c.posts}</div><div style={{fontFamily:'var(--mono)',fontSize:'.58rem',color:'var(--text-dim)',textTransform:'uppercase'}}>Posts</div></div>
-                </div>
-                <div style={{display:'flex',gap:'.3rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
-                  {c.tags.map(t => <span key={t} style={{padding:'.15rem .45rem',borderRadius:999,fontSize:'.65rem',fontFamily:'var(--mono)',background:'var(--glass)',border:'1px solid var(--border)',color:'var(--text-dim)'}}>{t}</span>)}
-                </div>
-                <div style={{display:'flex',gap:'.5rem'}}>
-                  <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={() => {setCollabTab('builder');addToast(`Building package for ${c.name}...`,'info')}}>{Icons.send} Send Package</button>
-                  <button className="btn btn-ghost btn-sm" style={{flex:1}}>View Profile</button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -3755,42 +3999,46 @@ function CollaborationView() {
       {collabTab === 'campaigns' && (
         <div className="grid-2">
           <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
-            {MOCK_CAMPAIGNS.map(camp => (
+            {campaigns.map(camp => (
               <div key={camp.id} className="card" style={{cursor:'pointer',borderColor:selectedCampaign?.id===camp.id?'var(--yellow)':'var(--glass-border)'}} onClick={() => setSelectedCampaign(camp)}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.75rem'}}>
                   <div>
                     <div style={{fontFamily:'var(--display)',fontWeight:700,fontSize:'1.05rem'}}>{camp.name}</div>
-                    <div style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>{camp.start} — {camp.end}</div>
+                    <div style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>{camp.start || 'No start'} — {camp.end || 'No end'}</div>
                   </div>
                   <span style={{fontFamily:'var(--mono)',fontSize:'.68rem',padding:'.2rem .5rem',borderRadius:'var(--radius)',background:camp.status==='active'?'rgba(0,230,138,0.1)':camp.status==='completed'?'rgba(139,92,246,0.1)':'rgba(255,214,10,0.1)',color:camp.status==='active'?'var(--green)':camp.status==='completed'?'var(--purple)':'var(--yellow)',textTransform:'uppercase'}}>{camp.status}</span>
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.75rem'}}>
                   <div style={{display:'flex'}}>
-                    {camp.collaborators.slice(0,4).map((cid,i) => {
-                      const col = MOCK_COLLABORATORS.find(c=>c.id===cid);
-                      return <div key={cid} style={{width:28,height:28,borderRadius:'50%',background:'var(--gradient-warm)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'.65rem',color:'var(--ink)',marginLeft:i>0?-8:0,border:'2px solid var(--bg-solid)',zIndex:4-i}}>{col?.photo}</div>;
+                    {(camp.collaborators||[]).slice(0,4).map((cid,i) => {
+                      const col = collaborators.find(c=>c.id===cid);
+                      return col ? <div key={cid} style={{width:28,height:28,borderRadius:'50%',background:'var(--gradient-warm)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'.65rem',color:'var(--ink)',marginLeft:i>0?-8:0,border:'2px solid var(--bg-solid)',zIndex:4-i}}>{col.photo}</div> : null;
                     })}
                   </div>
-                  <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>{camp.collaborators.length} collaborators</span>
+                  <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>{(camp.collaborators||[]).length} collaborators</span>
                 </div>
-                <div style={{display:'flex',alignItems:'center',gap:'.75rem'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'.75rem',marginBottom:'.5rem'}}>
                   <div style={{flex:1,height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
-                    <div style={{height:'100%',background:'var(--gradient-warm)',borderRadius:3,width:`${camp.total>0?(camp.posted/camp.total)*100:0}%`,transition:'width .3s'}}></div>
+                    <div style={{height:'100%',background:'var(--gradient-warm)',borderRadius:3,width:`${camp.total>0?(camp.sent/camp.total)*100:0}%`,transition:'width .3s'}}></div>
                   </div>
-                  <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>{camp.posted}/{camp.total}</span>
+                  <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>{camp.sent||0}/{camp.total||0}</span>
+                </div>
+                <div style={{display:'flex',gap:'.35rem'}} onClick={e => e.stopPropagation()}>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.68rem',padding:'.25rem .5rem'}} onClick={() => setEditingCampaign({...camp, collaborator_ids: camp.collaborators})}>Edit</button>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.68rem',padding:'.25rem .5rem',color:'var(--red)'}} onClick={() => deleteCampaign(camp.id)}>Delete</button>
                 </div>
               </div>
             ))}
-            <button className="btn btn-ghost" style={{width:'100%',borderStyle:'dashed'}} onClick={() => addToast('New campaign created!','success')}>+ Create Campaign</button>
+            <button className="btn btn-ghost" style={{width:'100%',borderStyle:'dashed'}} onClick={() => setEditingCampaign({collaborator_ids:[],content_ids:[],status:'draft'})}>+ Create Campaign</button>
           </div>
 
           <div className="card">
             <div className="card-head"><h3>{selectedCampaign ? selectedCampaign.name : 'Select a Campaign'}</h3></div>
             {selectedCampaign ? (
               <div>
-                <div style={{marginBottom:'1rem'}}>
-                  {selectedCampaign.collaborators.map(cid => {
-                    const col = MOCK_COLLABORATORS.find(c=>c.id===cid);
+                <div style={{marginBottom:'1rem',maxHeight:380,overflowY:'auto'}}>
+                  {(selectedCampaign.collaborators||[]).map(cid => {
+                    const col = collaborators.find(c=>c.id===cid);
                     if (!col) return null;
                     return (
                       <div key={cid} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.65rem 0',borderBottom:'1px solid var(--border)'}}>
@@ -3800,13 +4048,25 @@ function CollaborationView() {
                           <div style={{fontFamily:'var(--mono)',fontSize:'.68rem',color:'var(--text-dim)'}}>{col.handle} &middot; {col.timezone}</div>
                         </div>
                         <div style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-dim)'}}>
-                          {col.platform === 'ig' ? '11:00 AM' : col.platform === 'tt' ? '7:00 PM' : col.platform === 'yt' ? '2:00 PM' : '9:00 AM'} {col.timezone.split(' ')[0]}
+                          {col.platform === 'ig' ? '11:00 AM' : col.platform === 'tt' ? '7:00 PM' : col.platform === 'yt' ? '2:00 PM' : '9:00 AM'} {(col.timezone||'').split(' ')[0]}
                         </div>
                       </div>
                     );
                   })}
+                  {(!selectedCampaign.collaborators || selectedCampaign.collaborators.length === 0) && <div style={{textAlign:'center',padding:'2rem',color:'var(--text-dim)',fontSize:'.85rem'}}>No collaborators assigned. Click Edit to add some.</div>}
                 </div>
-                <button className="btn btn-primary" style={{width:'100%'}} onClick={() => addToast(`Packages sent to ${selectedCampaign.collaborators.length} collaborators via Resend!`,'success')}>{Icons.send} Build & Send All Packages</button>
+                {sendingPackages ? (
+                  <div>
+                    <div style={{fontFamily:'var(--mono)',fontSize:'.78rem',color:'var(--yellow)',marginBottom:'.5rem'}}>Building & sending packages... {sendProgress}%</div>
+                    <div style={{height:6,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{height:'100%',background:'var(--gradient-warm)',borderRadius:3,width:sendProgress+'%',transition:'width .3s'}}></div>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="btn btn-primary" style={{width:'100%'}} onClick={() => buildAndSendPackages(selectedCampaign)} disabled={!selectedCampaign.collaborators || selectedCampaign.collaborators.length === 0}>
+                    {Icons.send} Build & Send All Packages ({(selectedCampaign.collaborators||[]).length})
+                  </button>
+                )}
               </div>
             ) : (
               <div style={{textAlign:'center',padding:'3rem 0',color:'var(--text-dim)'}}>Click a campaign to view details and send packages</div>
@@ -3818,7 +4078,7 @@ function CollaborationView() {
       {/* PACKAGE TRACKER */}
       {collabTab === 'tracker' && (
         <div className="card">
-          <div className="card-head"><h3>Package Status</h3>
+          <div className="card-head"><h3>Package Status {liveMode && <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',color:'var(--green)',marginLeft:'.5rem'}}>● LIVE</span>}</h3>
             <div style={{display:'flex',gap:'.5rem'}}>
               <button className="btn btn-ghost btn-sm" onClick={() => addToast('Reminders sent to all pending!','success')}>Remind All</button>
               <button className="btn btn-ghost btn-sm" onClick={() => addToast('Failed packages resent!','success')}>Resend Failed</button>
@@ -3834,16 +4094,16 @@ function CollaborationView() {
                 </tr>
               </thead>
               <tbody>
-                {MOCK_COLLABORATORS.slice(0,6).map((c,i) => {
-                  const statuses = ['confirmed','posted','viewed','sent','sent','confirmed'];
-                  const st = statuses[i];
+                {(packages.length > 0 ? packages : collaborators.slice(0,6).map((c,i) => ({collaborator_id:c.id,status:['confirmed','posted','viewed','sent','sent','confirmed'][i],campaign_id:campaigns[i%3]?.id,sent_at:`Mar ${10+i}`}))).map((pkg,i) => {
+                  const c = collaborators.find(x => x.id === pkg.collaborator_id) || collaborators[i] || {};
+                  const camp = campaigns.find(x => x.id === pkg.campaign_id) || campaigns[i%3] || {name:'—'};
                   return (
-                    <tr key={c.id} style={{borderBottom:'1px solid var(--border)'}}>
-                      <td style={{padding:'.65rem .75rem'}}><div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div style={{width:28,height:28,borderRadius:'50%',background:'var(--gradient-warm)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'.65rem',color:'var(--ink)'}}>{c.photo}</div><div><div style={{fontWeight:600,fontSize:'.82rem'}}>{c.name}</div><div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)'}}>{c.handle}</div></div></div></td>
-                      <td style={{padding:'.65rem .75rem',fontFamily:'var(--mono)',fontSize:'.78rem',color:'var(--text-muted)'}}>{MOCK_CAMPAIGNS[i%3].name}</td>
-                      <td style={{padding:'.65rem .75rem'}}><span className={`platform-badge ${c.platform}`} style={{fontSize:'.6rem',padding:'.1rem .35rem'}}>{c.platform.toUpperCase()}</span></td>
-                      <td style={{padding:'.65rem .75rem'}}><StatusPipeline status={st} /></td>
-                      <td style={{padding:'.65rem .75rem',fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-dim)'}}>Mar {10+i}</td>
+                    <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
+                      <td style={{padding:'.65rem .75rem'}}><div style={{display:'flex',alignItems:'center',gap:'.5rem'}}><div style={{width:28,height:28,borderRadius:'50%',background:'var(--gradient-warm)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'.65rem',color:'var(--ink)'}}>{c.photo||'?'}</div><div><div style={{fontWeight:600,fontSize:'.82rem'}}>{c.name||'Unknown'}</div><div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)'}}>{c.handle||''}</div></div></div></td>
+                      <td style={{padding:'.65rem .75rem',fontFamily:'var(--mono)',fontSize:'.78rem',color:'var(--text-muted)'}}>{camp.name}</td>
+                      <td style={{padding:'.65rem .75rem'}}><span className={`platform-badge ${c.platform||'ig'}`} style={{fontSize:'.6rem',padding:'.1rem .35rem'}}>{(c.platform||'ig').toUpperCase()}</span></td>
+                      <td style={{padding:'.65rem .75rem'}}><StatusPipeline status={pkg.status} /></td>
+                      <td style={{padding:'.65rem .75rem',fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-dim)'}}>{typeof pkg.sent_at === 'string' && pkg.sent_at.includes('-') ? new Date(pkg.sent_at).toLocaleDateString('en',{month:'short',day:'numeric'}) : pkg.sent_at}</td>
                       <td style={{padding:'.65rem .75rem'}}><button className="btn btn-ghost btn-sm" onClick={() => addToast(`Reminder sent to ${c.name}`,'success')}>Remind</button></td>
                     </tr>
                   );
@@ -3857,13 +4117,12 @@ function CollaborationView() {
       {/* EMAIL BUILDER */}
       {collabTab === 'builder' && (
         <div style={{display:'grid',gridTemplateColumns:'2fr 3fr',gap:'1.25rem'}}>
-          {/* TEMPLATE CONTROLS */}
           <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
             <div className="card">
               <div className="card-head"><h3>Package Template</h3></div>
               <label className="field"><span className="lbl">Subject Line</span><input className="input" defaultValue="[Action Required] Your Content Package is Ready — Post by March 18" /></label>
               <label className="field"><span className="lbl">Collaborator</span>
-                <select className="input">{MOCK_COLLABORATORS.map(c => <option key={c.id}>{c.name} ({c.handle})</option>)}</select>
+                <select className="input">{collaborators.map(c => <option key={c.id}>{c.name} ({c.handle})</option>)}</select>
               </label>
               <label className="field"><span className="lbl">Content Piece</span>
                 <select className="input">{MOCK_CONTENT.filter(c=>c.status==='approved'||c.status==='published').map(c => <option key={c.id}>{c.title}</option>)}</select>
@@ -3878,10 +4137,9 @@ function CollaborationView() {
                 </label>
               ))}
             </div>
-            <button className="btn btn-primary" style={{width:'100%'}} onClick={() => addToast('Package sent via Resend API!','success')}>{Icons.send} Send Package</button>
+            <button className="btn btn-primary" style={{width:'100%'}} onClick={() => addToast('Use Campaigns tab to send to multiple collaborators at once','info')}>{Icons.send} Send Test Package</button>
           </div>
 
-          {/* PACKAGE PREVIEW */}
           <div className="card" style={{padding:0,overflow:'hidden'}}>
             <div style={{padding:'1rem 1.25rem',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <h3 style={{fontFamily:'var(--display)',fontSize:'1.1rem'}}>Package Preview</h3>
@@ -3898,79 +4156,15 @@ function CollaborationView() {
                     <div style={{fontSize:'.85rem',fontWeight:700,color:'#111'}}>[Action Required] Your Content Package is Ready</div>
                   </div>
                   <div className="email-body" style={{fontSize:'.88rem',lineHeight:1.7}}>
-                    <p style={{marginBottom:'1rem'}}>Hi <strong>Maya</strong>,</p>
-                    <p style={{marginBottom:'1rem'}}>Your content package for the <strong>AI Tools Launch Sprint</strong> campaign is ready. Everything you need is below — just copy, paste, and post.</p>
-
-                    {/* POSTING TIME */}
+                    <p style={{marginBottom:'1rem'}}>Hi <strong>{collaborators[0]?.name?.split(' ')[0] || 'Maya'}</strong>,</p>
+                    <p style={{marginBottom:'1rem'}}>Your content package is ready. Everything you need is below — just copy, paste, and post.</p>
                     <div style={{background:'#FFF8E1',border:'1px solid #FFD60A',borderRadius:8,padding:'1rem',marginBottom:'1rem'}}>
                       <div style={{fontWeight:800,fontSize:'.82rem',color:'#333',marginBottom:'.25rem'}}>POSTING TIME</div>
                       <div style={{fontSize:'1.1rem',fontWeight:700,color:'#111'}}>Monday, March 18 at 11:00 AM PST</div>
                       <div style={{fontSize:'.78rem',color:'#666'}}>Instagram Reel &middot; Optimized for your timezone</div>
                     </div>
-
-                    {/* CAPTION */}
-                    <div style={{background:'#f5f5f5',borderRadius:8,padding:'1rem',marginBottom:'1rem',position:'relative'}}>
-                      <div style={{fontWeight:800,fontSize:'.72rem',color:'#333',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.1em'}}>READY-TO-PASTE CAPTION</div>
-                      <div style={{background:'#fff',border:'1px solid #ddd',borderRadius:6,padding:'.75rem',fontSize:'.85rem',color:'#333',fontFamily:'sans-serif',lineHeight:1.6}}>
-                        Most people think AI automation is about saving time.<br/><br/>
-                        It's actually about making decisions you didn't know you were missing.<br/><br/>
-                        Here's what changed when I deployed my first AI agent...<br/><br/>
-                        Comment "DECISIONS" and I'll send you the full framework.<br/><br/>
-                        #aiautomation #aibusiness #contentmachine
-                      </div>
-                      <div style={{fontSize:'.7rem',color:'#999',marginTop:'.5rem',fontStyle:'italic'}}>Tap to copy entire caption</div>
-                    </div>
-
-                    {/* HASHTAGS */}
-                    <div style={{background:'#f0f4ff',borderRadius:8,padding:'1rem',marginBottom:'1rem'}}>
-                      <div style={{fontWeight:800,fontSize:'.72rem',color:'#333',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.1em'}}>HASHTAG SET (30 for Instagram)</div>
-                      <div style={{fontSize:'.82rem',color:'#4169E1',lineHeight:1.8}}>#aiautomation #aibusiness #contentcreator #aitools #smallbusiness #entrepreneurlife #aistrategy #contentmachine #automation #socialstrategy #contentcreation #aiagents #businessautomation #growthhacking #digitalmarketing #reelsinstagram #contentmarketing #techstartup #onlinebusiness #ailife #businesstips #marketingtips #viralcontent #socialmediatips #growthmindset #contentisking #aisolutions #buildwithAI #futureofwork #nocode</div>
-                    </div>
-
-                    {/* MENTIONS */}
-                    <div style={{background:'#f5f5f5',borderRadius:8,padding:'1rem',marginBottom:'1rem'}}>
-                      <div style={{fontWeight:800,fontSize:'.72rem',color:'#333',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.1em'}}>MENTIONS & TAGS</div>
-                      <div style={{fontSize:'.88rem',color:'#333'}}>Tag: <strong>@LaminSNgobeh</strong> &middot; Location: <strong>New York, NY</strong></div>
-                    </div>
-
-                    {/* BRAND VOICE */}
-                    <div style={{background:'#f5fff5',border:'1px solid #c8e6c9',borderRadius:8,padding:'1rem',marginBottom:'1rem'}}>
-                      <div style={{fontWeight:800,fontSize:'.72rem',color:'#333',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.1em'}}>BRAND VOICE GUIDE</div>
-                      <ul style={{paddingLeft:'1.25rem',fontSize:'.82rem',color:'#555',lineHeight:1.8}}>
-                        <li>Tone: Direct, warm, smart. Never preachy or salesy.</li>
-                        <li>Audience: Business owners + operators (0-moderate AI experience)</li>
-                        <li>Key phrase: "You don't need AI to do your job faster"</li>
-                        <li>Always end with a CTA keyword + value promise</li>
-                      </ul>
-                    </div>
-
-                    {/* DM TEMPLATES */}
-                    <div style={{background:'#fff5f5',borderRadius:8,padding:'1rem',marginBottom:'1rem'}}>
-                      <div style={{fontWeight:800,fontSize:'.72rem',color:'#333',marginBottom:'.5rem',textTransform:'uppercase',letterSpacing:'.1em'}}>DM RESPONSE TEMPLATES</div>
-                      <div style={{display:'flex',flexDirection:'column',gap:'.5rem'}}>
-                        {[
-                          {label:'When someone comments "DECISIONS"',text:'Hey! Thanks for commenting. Here\'s the full AI Decision Framework: [LINK]. Let me know which part resonates most!'},
-                          {label:'When someone asks a question',text:'Great question! The short answer: AI agents handle decisions you didn\'t know existed. The framework breaks it all down: [LINK]'},
-                          {label:'When someone shares the post',text:'Thanks so much for sharing! If you want the advanced version with all 46 prompts, drop me a DM.'},
-                        ].map((dm,i) => (
-                          <div key={i} style={{background:'#fff',border:'1px solid #eee',borderRadius:6,padding:'.65rem'}}>
-                            <div style={{fontSize:'.72rem',fontWeight:700,color:'#333',marginBottom:'.25rem'}}>{dm.label}:</div>
-                            <div style={{fontSize:'.82rem',color:'#555',fontStyle:'italic'}}>"{dm.text}"</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* MARK AS POSTED */}
                     <div style={{textAlign:'center',padding:'1.5rem 0'}}>
-                      <div style={{display:'inline-block',padding:'.85rem 2rem',background:'linear-gradient(135deg,#FFD60A,#FF8C00)',color:'#050508',fontWeight:800,borderRadius:8,fontSize:'1rem',cursor:'pointer',boxShadow:'0 4px 16px rgba(255,214,10,0.3)'}}>
-                        Mark as Posted
-                      </div>
-                      <div style={{fontSize:'.72rem',color:'#999',marginTop:'.5rem'}}>Click after you've posted to confirm completion</div>
-                    </div>
-
-                    <div style={{borderTop:'1px solid #eee',marginTop:'1rem',paddingTop:'.75rem',fontSize:'.72rem',color:'#999',textAlign:'center'}}>
-                      Sent via Supernova Editor &middot; Rara Avis Marketing LLC &middot; @LaminSNgobeh
+                      <div style={{display:'inline-block',padding:'.85rem 2rem',background:'linear-gradient(135deg,#FFD60A,#FF8C00)',color:'#050508',fontWeight:800,borderRadius:8,fontSize:'1rem'}}>Mark as Posted</div>
                     </div>
                   </div>
                 </div>
@@ -3979,6 +4173,126 @@ function CollaborationView() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================================================
+   COLLABORATOR & CAMPAIGN MODALS
+   ============================================================ */
+function CollaboratorModal({collab, onSave, onClose}) {
+  const [data, setData] = useState({
+    name: collab.name||'', handle: collab.handle||'', email: collab.email||'',
+    platform: collab.platform||'ig', timezone: collab.timezone||'EST (UTC-5)',
+    tier: collab.tier||'Bronze', level: collab.level||'Influencer',
+    followers: collab.followers||'', engagement: collab.engagement||0,
+    status: collab.status||'active', tags: (collab.tags||[]).join(', '),
+    id: collab.id
+  });
+  const u = (k,v) => setData(p => ({...p, [k]:v}));
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',backdropFilter:'blur(8px)',zIndex:200,display:'grid',placeItems:'start center',paddingTop:'10vh'}} onClick={onClose}>
+      <div style={{width:'min(560px,90vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:'var(--radius-xl)',padding:'1.5rem',boxShadow:'0 20px 60px rgba(0,0,0,.5),var(--glow-md)',maxHeight:'80vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem'}}>
+          <h3 style={{fontFamily:'var(--display)',fontSize:'1.2rem'}}>{collab.id ? 'Edit Collaborator' : 'Add Collaborator'}</h3>
+          <button className="icon-btn" onClick={onClose} style={{width:28,height:28}}>{Icons.x}</button>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem'}}>
+          <label className="field"><span className="lbl">Name *</span><input className="input" value={data.name} onChange={e => u('name',e.target.value)} /></label>
+          <label className="field"><span className="lbl">Handle *</span><input className="input" placeholder="@username" value={data.handle} onChange={e => u('handle',e.target.value)} /></label>
+          <label className="field"><span className="lbl">Email *</span><input className="input" type="email" value={data.email} onChange={e => u('email',e.target.value)} /></label>
+          <label className="field"><span className="lbl">Followers</span><input className="input" placeholder="285K" value={data.followers} onChange={e => u('followers',e.target.value)} /></label>
+          <label className="field"><span className="lbl">Platform</span>
+            <select className="input" value={data.platform} onChange={e => u('platform',e.target.value)}>
+              <option value="ig">Instagram</option><option value="tt">TikTok</option><option value="yt">YouTube</option><option value="li">LinkedIn</option><option value="fb">Facebook</option>
+            </select>
+          </label>
+          <label className="field"><span className="lbl">Timezone</span>
+            <select className="input" value={data.timezone} onChange={e => u('timezone',e.target.value)}>
+              <option>PST (UTC-8)</option><option>MST (UTC-7)</option><option>CST (UTC-6)</option><option>EST (UTC-5)</option><option>GMT (UTC+0)</option><option>CET (UTC+1)</option><option>GST (UTC+4)</option><option>JST (UTC+9)</option>
+            </select>
+          </label>
+          <label className="field"><span className="lbl">Tier</span>
+            <select className="input" value={data.tier} onChange={e => u('tier',e.target.value)}>
+              <option>Bronze</option><option>Silver</option><option>Gold</option><option>Platinum</option>
+            </select>
+          </label>
+          <label className="field"><span className="lbl">Level</span>
+            <select className="input" value={data.level} onChange={e => u('level',e.target.value)}>
+              <option>Influencer</option><option>Ambassador</option><option>Partner</option><option>Affiliate</option>
+            </select>
+          </label>
+          <label className="field"><span className="lbl">Engagement %</span><input className="input" type="number" step="0.1" value={data.engagement} onChange={e => u('engagement',e.target.value)} /></label>
+          <label className="field"><span className="lbl">Status</span>
+            <select className="input" value={data.status} onChange={e => u('status',e.target.value)}>
+              <option value="active">Active</option><option value="invited">Invited</option><option value="paused">Paused</option>
+            </select>
+          </label>
+        </div>
+        <label className="field" style={{marginTop:'.5rem'}}><span className="lbl">Tags (comma separated)</span><input className="input" value={data.tags} onChange={e => u('tags',e.target.value)} placeholder="lifestyle, tech, AI" /></label>
+        <div style={{display:'flex',gap:'.5rem',marginTop:'1rem'}}>
+          <button className="btn btn-primary" style={{flex:1}} disabled={!data.name||!data.email} onClick={() => onSave({...data, tags: data.tags.split(',').map(t=>t.trim()).filter(Boolean), engagement: parseFloat(data.engagement)||0})}>{collab.id ? 'Update' : 'Add Collaborator'}</button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CampaignModal({camp, collaborators, onSave, onClose}) {
+  const [data, setData] = useState({
+    id: camp.id, name: camp.name||'', status: camp.status||'draft',
+    start_date: camp.start_date||'', end_date: camp.end_date||'',
+    collaborator_ids: camp.collaborator_ids || camp.collaborators || [],
+    content_ids: camp.content_ids || []
+  });
+  const u = (k,v) => setData(p => ({...p, [k]:v}));
+  const toggleCollab = (id) => setData(p => ({...p, collaborator_ids: p.collaborator_ids.includes(id) ? p.collaborator_ids.filter(c => c !== id) : [...p.collaborator_ids, id]}));
+  const toggleContent = (id) => setData(p => ({...p, content_ids: p.content_ids.includes(id) ? p.content_ids.filter(c => c !== id) : [...p.content_ids, id]}));
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',backdropFilter:'blur(8px)',zIndex:200,display:'grid',placeItems:'start center',paddingTop:'8vh'}} onClick={onClose}>
+      <div style={{width:'min(720px,95vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:'var(--radius-xl)',padding:'1.5rem',boxShadow:'0 20px 60px rgba(0,0,0,.5),var(--glow-md)',maxHeight:'85vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem'}}>
+          <h3 style={{fontFamily:'var(--display)',fontSize:'1.2rem'}}>{camp.id ? 'Edit Campaign' : 'New Campaign'}</h3>
+          <button className="icon-btn" onClick={onClose} style={{width:28,height:28}}>{Icons.x}</button>
+        </div>
+        <label className="field"><span className="lbl">Campaign Name *</span><input className="input" value={data.name} onChange={e => u('name',e.target.value)} placeholder="e.g., AI Tools Launch Sprint" autoFocus /></label>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.75rem'}}>
+          <label className="field"><span className="lbl">Start Date</span><input className="input" type="date" value={data.start_date} onChange={e => u('start_date',e.target.value)} /></label>
+          <label className="field"><span className="lbl">End Date</span><input className="input" type="date" value={data.end_date} onChange={e => u('end_date',e.target.value)} /></label>
+          <label className="field"><span className="lbl">Status</span>
+            <select className="input" value={data.status} onChange={e => u('status',e.target.value)}>
+              <option value="draft">Draft</option><option value="active">Active</option><option value="completed">Completed</option>
+            </select>
+          </label>
+        </div>
+        <label className="field"><span className="lbl">Content Pieces ({data.content_ids.length} selected)</span>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.35rem',maxHeight:140,overflowY:'auto',padding:'.5rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)'}}>
+            {MOCK_CONTENT.map(c => (
+              <label key={c.id} style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.35rem .5rem',background:data.content_ids.includes(c.id)?'rgba(255,214,10,0.08)':'transparent',borderRadius:'var(--radius)',cursor:'pointer',fontSize:'.78rem'}}>
+                <input type="checkbox" checked={data.content_ids.includes(c.id)} onChange={() => toggleContent(c.id)} style={{accentColor:'var(--yellow)'}} />
+                <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</span>
+              </label>
+            ))}
+          </div>
+        </label>
+        <label className="field"><span className="lbl">Collaborators ({data.collaborator_ids.length} selected)</span>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.35rem',maxHeight:200,overflowY:'auto',padding:'.5rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)'}}>
+            {collaborators.map(c => (
+              <label key={c.id} style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.4rem .5rem',background:data.collaborator_ids.includes(c.id)?'rgba(255,214,10,0.08)':'transparent',borderRadius:'var(--radius)',cursor:'pointer',fontSize:'.78rem'}}>
+                <input type="checkbox" checked={data.collaborator_ids.includes(c.id)} onChange={() => toggleCollab(c.id)} style={{accentColor:'var(--yellow)'}} />
+                <div style={{width:24,height:24,borderRadius:'50%',background:'var(--gradient-warm)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,fontSize:'.62rem',color:'var(--ink)',flexShrink:0}}>{c.photo}</div>
+                <span style={{flex:1,fontSize:'.75rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</span>
+                <span className={`platform-badge ${c.platform}`} style={{fontSize:'.55rem',padding:'.1rem .25rem'}}>{c.platform.toUpperCase()}</span>
+              </label>
+            ))}
+          </div>
+        </label>
+        <div style={{display:'flex',gap:'.5rem',marginTop:'1rem'}}>
+          <button className="btn btn-primary" style={{flex:1}} disabled={!data.name} onClick={() => onSave(data)}>{camp.id ? 'Update Campaign' : 'Create Campaign'}</button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
