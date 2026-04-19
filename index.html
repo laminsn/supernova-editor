@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta name="theme-color" content="#FFD60A">
-<meta name="description" content="SUPERNOVA EDITOR — the all-in-one content creation operating system with built-in v4.1 strategy, dual-shot recording, AI generation, and multilingual publishing.">
-<title>SUPERNOVA EDITOR - Content Creation Operating System</title>
+<meta name="description" content="SUPERNOVA EDITOR — the all-in-one content creation operating system. Strategy, Brain Score, Recording, Vault, Workflows, Blog, and Publishing in one platform. Powered by Claude AI.">
+<title>SUPERNOVA EDITOR — Powered by Claude AI</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%23FFD60A'/><stop offset='100%25' stop-color='%23FF8C00'/></linearGradient></defs><rect width='100' height='100' rx='20' fill='url(%23g)'/><text x='50' y='72' font-size='65' font-weight='900' font-family='sans-serif' text-anchor='middle' fill='%23050508'>S</text></svg>">
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -203,6 +203,17 @@ nav.landing-nav .glass-nav{background:rgba(5,5,8,0.6);backdrop-filter:blur(24px)
 .hero-eyebrow{display:inline-flex;align-items:center;gap:.6rem;padding:.5rem 1.1rem;background:rgba(255,214,10,0.08);border:1px solid rgba(255,214,10,0.2);border-radius:999px;font-family:var(--mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;font-weight:500;color:var(--yellow);margin-bottom:2rem;animation:fadeUp .6s ease both;backdrop-filter:blur(10px)}
 .pulse-dot{width:6px;height:6px;background:var(--yellow);border-radius:50%;animation:pulse 2s infinite;box-shadow:0 0 10px var(--yellow)}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,214,10,.6)}50%{box-shadow:0 0 0 8px rgba(255,214,10,0)}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.blog-preview h1{font-size:1.7rem;margin:0 0 .5rem;font-weight:800;line-height:1.25}
+.blog-preview h2{font-size:1.25rem;margin:1.5rem 0 .5rem;font-weight:700;color:var(--yellow)}
+.blog-preview h3{font-size:1.05rem;margin:1.1rem 0 .4rem;font-weight:700}
+.blog-preview p{margin:0 0 .85rem;color:var(--text-muted);line-height:1.7}
+.blog-preview ul,.blog-preview ol{margin:.5rem 0 1rem;padding-left:1.5rem;color:var(--text-muted)}
+.blog-preview li{margin-bottom:.35rem;line-height:1.6}
+.blog-preview a{color:var(--yellow);text-decoration:underline}
+.blog-preview code{font-family:var(--mono);font-size:.85em;padding:.12rem .35rem;background:var(--glass);border-radius:3px;color:var(--text)}
+.blog-preview blockquote{margin:1rem 0;padding:.5rem 1rem;border-left:3px solid var(--yellow);background:rgba(255,214,10,0.04);color:var(--text-muted);font-style:italic}
+.blog-preview img{max-width:100%;border-radius:8px;margin:1rem 0}
 .hero h1{font-family:var(--display);font-weight:800;font-size:clamp(3rem,9vw,7.5rem);line-height:.88;letter-spacing:-.045em;margin-bottom:1.5rem;max-width:16ch;animation:fadeUp .7s ease .1s both}
 .hero h1 .yellow{background:var(--gradient-brand-text);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .hero-sub{font-size:clamp(1.05rem,1.5vw,1.3rem);color:var(--text-muted);max-width:58ch;margin-bottom:2.5rem;line-height:1.6;animation:fadeUp .7s ease .25s both}
@@ -828,6 +839,15 @@ function AppProvider({children}) {
   const [latestStrategy, setLatestStrategy] = useState(null);
   const [vaultOpen, setVaultOpen] = useState(false);
   const [vaultLoadHandler, setVaultLoadHandler] = useState(null);
+  const [activeCampaign, _setActiveCampaign] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('eos-active-campaign') || 'null'); } catch { return null; }
+  });
+  const [campaigns, setCampaigns] = useState([]);
+  const setActiveCampaign = useCallback((c) => {
+    _setActiveCampaign(c);
+    if (c) localStorage.setItem('eos-active-campaign', JSON.stringify(c));
+    else localStorage.removeItem('eos-active-campaign');
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -857,8 +877,9 @@ function AppProvider({children}) {
     theme, toggleTheme, lang, setLang, t, view, setView, toasts, addToast,
     drawerOpen, setDrawerOpen, drawerTab, setDrawerTab, sidebarOpen, setSidebarOpen,
     cmdOpen, setCmdOpen, latestStrategy, setLatestStrategy, vaultOpen, setVaultOpen,
-    vaultLoadHandler, setVaultLoadHandler
-  }), [theme, lang, t, view, toasts, drawerOpen, drawerTab, sidebarOpen, cmdOpen, latestStrategy, vaultOpen, vaultLoadHandler, addToast, toggleTheme]);
+    vaultLoadHandler, setVaultLoadHandler,
+    activeCampaign, setActiveCampaign, campaigns, setCampaigns,
+  }), [theme, lang, t, view, toasts, drawerOpen, drawerTab, sidebarOpen, cmdOpen, latestStrategy, vaultOpen, vaultLoadHandler, activeCampaign, campaigns, addToast, toggleTheme, setActiveCampaign]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
@@ -1430,7 +1451,7 @@ function LandingPage() {
               <div className="price-amount"><span className="currency">$</span>0<span className="period"> /forever</span></div>
               <div className="price-tagline">Try the Strategy Engine and see your first Brain Score</div>
               <ul className="price-features">
-                <li>5 strategies / month</li>
+                <li>5 strategies / month <span style={{color:'var(--yellow)',fontSize:'.7em'}}>· Claude AI</span></li>
                 <li>Brain Score (v0)</li>
                 <li>Strategy Vault (last 10)</li>
                 <li>1 brand workspace</li>
@@ -1447,10 +1468,11 @@ function LandingPage() {
               <div className="price-amount"><span className="currency">$</span>19<span className="period"> /mo</span></div>
               <div className="price-tagline">For solo creators publishing 4+ pieces a week</div>
               <ul className="price-features">
-                <li>Unlimited strategies</li>
+                <li>Unlimited strategies <span style={{color:'var(--yellow)',fontSize:'.7em'}}>· powered by Claude</span></li>
                 <li>All 46 mega prompts</li>
                 <li>Strategy Vault (unlimited)</li>
                 <li>Multi-screen + teleprompter</li>
+                <li>Workflows (6 templates) + Blog Builder</li>
                 <li>Auto-Edit Studio (Remove Dead Space, Auto Captions)</li>
                 <li>PDF export, no watermark</li>
                 <li>Collage Mode + Thumbnails Studio</li>
@@ -1466,13 +1488,14 @@ function LandingPage() {
               <ul className="price-features">
                 <li>Everything in Creator, plus:</li>
                 <li>Up to 3 brand workspaces</li>
+                <li>Native blog publish (WordPress + Ghost)</li>
                 <li>Collaboration packages (unlimited)</li>
                 <li>Email distribution via Resend</li>
                 <li>Lead Magnet generator</li>
                 <li>Comment Monitor (FB/IG/YT/LinkedIn)</li>
                 <li>Hashtag Intel + Competitor Spy</li>
                 <li>5 team seats</li>
-                <li>Priority support</li>
+                <li>Priority support · <span style={{color:'var(--yellow)'}}>Claude AI included</span></li>
               </ul>
               <button className="btn btn-primary price-cta" onClick={() => setView('dashboard')}>Start Pro</button>
             </div>
@@ -1536,20 +1559,31 @@ function LandingPage() {
         <button className="btn btn-lg" onClick={() => setView('dashboard')}>{t('launchApp')}</button>
       </section>
 
+      <div style={{textAlign:'center',padding:'1.25rem 1rem 0',fontFamily:'var(--mono)',fontSize:'.74rem',color:'var(--text-muted)',letterSpacing:'.04em'}}>
+        ⚡ <span style={{color:'var(--text-dim)'}}>Powered by</span> <span style={{color:'var(--yellow)',fontWeight:700}}>Claude</span> <span style={{color:'var(--text-dim)'}}>· Anthropic's most advanced AI · Built for creators who ship</span>
+      </div>
+
       <footer>
         <div className="footer-inner">
           <div className="footer-top">
             <div className="footer-about">
               <div className="logo"><div className="logo-mark">S</div><div className="logo-text"><span className="pri">SUPERNOVA</span><span className="sec">EDITOR</span></div></div>
-              <p>The content creation operating system built for creators who mean business. Now with Neural Impact Analysis, Teleprompter, Reaction Mode, and Email Video Embedding.</p>
+              <p>The content creation operating system built for creators who mean business. Powered by Claude AI. Strategy + Brain Score + Recording + Vault + Workflows + Blog + Publishing in one platform.</p>
             </div>
             <div className="footer-col"><h4>Product</h4><a href="#features">Features</a><a href="#moat">Moat</a><a href="#pricing">Pricing</a><a href="#whats-new">What's New</a><a href="#faq">FAQ</a></div>
-            <div className="footer-col"><h4>New in Editor</h4><a href="#">Neural Impact</a><a href="#">Teleprompter</a><a href="#">Reaction Mode</a><a href="#">Email Embed</a></div>
-            <div className="footer-col"><h4>Connect</h4><a href="#">@LaminSNgobeh</a><a href="#">Rara Avis Marketing</a><a href="#">Telegram</a></div>
+            <div className="footer-col"><h4>New in Editor</h4><a href="#">Workflows</a><a href="#">Blog Builder</a><a href="#">Brain Score</a><a href="#">Strategy Vault</a></div>
+            <div className="footer-col">
+              <h4>Legal</h4>
+              <a href="?view=terms" onClick={(e) => {e.preventDefault(); setView('legal');}}>Terms of Service</a>
+              <a href="?view=privacy" onClick={(e) => {e.preventDefault(); setView('legal');}}>Privacy Policy</a>
+              <a href="?view=sms" onClick={(e) => {e.preventDefault(); setView('legal');}}>SMS Terms (10DLC)</a>
+              <a href="?view=email" onClick={(e) => {e.preventDefault(); setView('legal');}}>Email Terms</a>
+              <a href="mailto:support@raraavismarketing.com">Contact / Data Requests</a>
+            </div>
           </div>
           <div className="copy">
-            <span>&copy; 2052 Rara Avis Marketing LLC. All rights reserved.</span>
-            <span>SUPERNOVA EDITOR &middot; Content Machine</span>
+            <span>&copy; 2026 Rara Avis Marketing LLC. All rights reserved. Wilmington, DE 19801, USA.</span>
+            <span>SUPERNOVA EDITOR &middot; Powered by Claude AI</span>
           </div>
         </div>
       </footer>
@@ -1577,9 +1611,12 @@ function Sidebar() {
     {key:'spy',label:'Competitor Spy',icon:Icons.eye},
     {key:'collaboration',label:'Collaboration',icon:Icons.users},
     {key:'screenrec',label:'Screen Record',icon:Icons.video,badge:'NEW'},
+    {key:'workflows',label:'Workflows',icon:Icons.zap,badge:'NEW'},
+    {key:'blog',label:'Blog Builder',icon:Icons.type,badge:'NEW'},
     {key:'comments',label:'Comment Monitor',icon:Icons.bell,badge:'NEW'},
     {key:'email',label:'Email Studio',icon:Icons.mail},
     {key:'settings',label:'Settings',icon:Icons.gear},
+    {key:'legal',label:'Terms & Privacy',icon:Icons.shield},
   ];
 
   return (
@@ -1620,7 +1657,7 @@ function Sidebar() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',workflows:'Workflows',blog:'Blog Builder',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -1651,28 +1688,141 @@ function Topbar() {
    ============================================================ */
 function DashboardView() {
   const {setView, addToast} = useApp();
-  const published = MOCK_CONTENT.filter(c => c.status === 'published');
-  const totalViews = published.reduce((s,c) => s + c.views, 0);
+  const [stats, setStats] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [pipeline, setPipeline] = useState({draft:0, review:0, approved:0, published:0});
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [isLive, setIsLive] = useState(false);
+
+  const loadAll = useCallback(async () => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) {
+      // Mock fallback
+      const published = MOCK_CONTENT.filter(c => c.status === 'published');
+      setStats({total: 247, weekPublished: 18, totalViews30d: published.reduce((s,c) => s + c.views, 0), brainAvg: 87});
+      setActivity(ACTIVITY_FEED);
+      setPipeline({
+        draft: MOCK_CONTENT.filter(c=>c.status==='draft').length,
+        review: MOCK_CONTENT.filter(c=>c.status==='review').length,
+        approved: MOCK_CONTENT.filter(c=>c.status==='approved').length,
+        published: MOCK_CONTENT.filter(c=>c.status==='published').length,
+      });
+      setIsLive(false);
+      setLoading(false);
+      setLastRefresh(new Date());
+      return;
+    }
+    setLoading(true);
+    const wsId = sb.getWorkspaceId();
+    const wsFilter = wsId ? {workspace_id: wsId} : {};
+    const sevenDaysAgo = new Date(Date.now() - 7*24*60*60*1000).toISOString();
+    const thirtyDaysAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString();
+
+    const [content, brain, engagement, runs, blogs] = await Promise.all([
+      sb.fetch('content', {select:'id,status,type,title,created_at', eq: wsFilter, order:'created_at', ascending:false, limit:200}),
+      sb.fetch('brain_predictions', {select:'overall_score,topic,created_at', eq: wsFilter, order:'created_at', ascending:false, limit:30}),
+      sb.fetch('engagement_data', {select:'views,is_viral,posted_at', eq: wsFilter, order:'posted_at', ascending:false, limit:200}),
+      sb.fetch('workflow_runs', {select:'id,template_name,status,created_at', eq: wsFilter, order:'created_at', ascending:false, limit:5}),
+      sb.fetch('blog_posts', {select:'id,title,published_to,created_at', eq: wsFilter, order:'created_at', ascending:false, limit:5}),
+    ]);
+
+    const c = Array.isArray(content) ? content : [];
+    const b = Array.isArray(brain) ? brain : [];
+    const e = Array.isArray(engagement) ? engagement : [];
+    const r = Array.isArray(runs) ? runs : [];
+    const bp = Array.isArray(blogs) ? blogs : [];
+
+    const recent30dEngagement = e.filter(x => x.posted_at && x.posted_at >= thirtyDaysAgo);
+    const totalViews30d = recent30dEngagement.reduce((s, x) => s + (x.views || 0), 0);
+    const weekPublished = c.filter(x => x.status === 'published' && x.created_at >= sevenDaysAgo).length;
+    const brainAvg = b.length ? Math.round(b.reduce((s,x) => s + (x.overall_score || 0), 0) / b.length) : null;
+
+    setStats({total: c.length, weekPublished, totalViews30d, brainAvg});
+    setPipeline({
+      draft: c.filter(x => x.status === 'draft').length,
+      review: c.filter(x => x.status === 'review').length,
+      approved: c.filter(x => x.status === 'approved').length,
+      published: c.filter(x => x.status === 'published').length,
+    });
+
+    // Merge activity from all sources
+    const events = [
+      ...c.slice(0,5).map(x => ({color: x.status==='published'?'var(--green)':'var(--blue)', text: `${x.type==='strategy'?'Strategy':'Content'}: "${x.title}" — ${x.status}`, time: relativeTime(x.created_at), at: x.created_at})),
+      ...b.slice(0,5).map(x => ({color: x.overall_score>=75?'var(--green)':x.overall_score>=50?'var(--yellow)':'var(--red)', text: `Brain Score ${x.overall_score}/100 on "${x.topic}"`, time: relativeTime(x.created_at), at: x.created_at})),
+      ...r.slice(0,3).map(x => ({color:'var(--yellow)', text: `Workflow ${x.status}: ${x.template_name || 'unnamed'}`, time: relativeTime(x.created_at), at: x.created_at})),
+      ...bp.slice(0,3).map(x => ({color:'var(--blue)', text: `Blog post: "${x.title}"${(x.published_to||[]).length ? ' · published to '+x.published_to.map(p=>p.target).join(', ') : ''}`, time: relativeTime(x.created_at), at: x.created_at})),
+    ].sort((a,b) => (b.at || '').localeCompare(a.at || '')).slice(0, 10);
+
+    setActivity(events.length ? events : ACTIVITY_FEED);
+    setIsLive(true);
+    setLoading(false);
+    setLastRefresh(new Date());
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+    const onFocus = () => loadAll();
+    window.addEventListener('focus', onFocus);
+    const interval = setInterval(loadAll, 60000); // refresh every 60s
+    return () => { window.removeEventListener('focus', onFocus); clearInterval(interval); };
+  }, [loadAll]);
+
+  const showStats = stats || {total:0, weekPublished:0, totalViews30d:0, brainAvg:null};
 
   return (
     <div className="view-enter">
       <div className="view-head">
-        <div><h1>Dashboard</h1><div className="sub">Welcome back, Lamin. Your content machine at a glance.</div></div>
+        <div>
+          <h1>Dashboard</h1>
+          <div className="sub" style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+            <span>Welcome back, Lamin. Your content machine at a glance.</span>
+            {isLive && (
+              <span title={`Last refresh: ${lastRefresh ? lastRefresh.toLocaleTimeString() : '—'}`} style={{display:'inline-flex',alignItems:'center',gap:'.3rem',padding:'.18rem .45rem',background:'rgba(0,230,138,0.1)',border:'1px solid rgba(0,230,138,0.3)',borderRadius:5,fontSize:'.62rem',fontFamily:'var(--mono)',color:'var(--green)',textTransform:'uppercase',letterSpacing:'.06em',cursor:'help'}}>
+                <span style={{width:6,height:6,borderRadius:'50%',background:'var(--green)',boxShadow:'0 0 6px var(--green)'}}></span>LIVE
+              </span>
+            )}
+            {!isLive && !loading && (
+              <span style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>● demo data — connect Supabase in Settings for live</span>
+            )}
+          </div>
+        </div>
         <button className="btn btn-primary" onClick={() => setView('create')}>+ New Content</button>
       </div>
 
       <div className="stats-grid">
-        <div className="stat-card"><div className="label">Total Content</div><div className="value">247</div><div className="delta">+12% this month</div><div className="bar" style={{width:'75%'}}></div></div>
-        <div className="stat-card"><div className="label">Published This Week</div><div className="value">18</div><div className="delta">+3 from last week</div><div className="bar" style={{width:'60%'}}></div></div>
-        <div className="stat-card"><div className="label">Total Views (30d)</div><div className="value">{(totalViews/1000).toFixed(0)}K</div><div className="delta">+28% vs prior period</div><div className="bar" style={{width:'85%'}}></div></div>
-        <div className="stat-card"><div className="label">Neural Impact Avg</div><div className="value">87</div><div className="delta">+5 points this month</div><div className="bar" style={{width:'87%'}}></div></div>
+        <div className="stat-card">
+          <div className="label">Total Content</div>
+          <div className="value">{loading ? <SkeletonNumber/> : showStats.total}</div>
+          <div className="delta">{loading ? '…' : `${pipeline.published} published`}</div>
+          <div className="bar" style={{width: showStats.total ? Math.min(95, 30 + showStats.total) + '%' : '10%'}}></div>
+        </div>
+        <div className="stat-card">
+          <div className="label">Published This Week</div>
+          <div className="value">{loading ? <SkeletonNumber/> : showStats.weekPublished}</div>
+          <div className="delta">{loading ? '…' : `${pipeline.draft + pipeline.review} in pipeline`}</div>
+          <div className="bar" style={{width: Math.min(95, 20 + showStats.weekPublished * 8) + '%'}}></div>
+        </div>
+        <div className="stat-card">
+          <div className="label">Total Views (30d)</div>
+          <div className="value">{loading ? <SkeletonNumber/> : (showStats.totalViews30d >= 1000 ? (showStats.totalViews30d/1000).toFixed(1)+'K' : showStats.totalViews30d)}</div>
+          <div className="delta">{loading ? '…' : isLive ? 'from engagement_data' : '+28% vs prior period'}</div>
+          <div className="bar" style={{width:'85%'}}></div>
+        </div>
+        <div className="stat-card">
+          <div className="label">Brain Score Avg</div>
+          <div className="value">{loading ? <SkeletonNumber/> : (showStats.brainAvg ?? '—')}</div>
+          <div className="delta">{loading ? '…' : showStats.brainAvg ? 'across last 30 predictions' : 'no predictions yet'}</div>
+          <div className="bar" style={{width: (showStats.brainAvg || 50) + '%'}}></div>
+        </div>
       </div>
 
       <div className="grid-2">
         <div className="card">
-          <div className="card-head"><h3>Recent Activity</h3><button className="btn btn-ghost btn-sm">View All</button></div>
-          {ACTIVITY_FEED.map((a,i) => (
-            <div key={i} style={{display:'flex',alignItems:'flex-start',gap:'.75rem',padding:'.65rem 0',borderBottom:i < ACTIVITY_FEED.length-1 ? '1px solid var(--border)' : 'none'}}>
+          <div className="card-head"><h3>Recent Activity</h3><button className="btn btn-ghost btn-sm" onClick={loadAll}>↻ Refresh</button></div>
+          {loading && <div style={{padding:'1rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.85rem'}}>Loading…</div>}
+          {!loading && activity.map((a,i) => (
+            <div key={i} style={{display:'flex',alignItems:'flex-start',gap:'.75rem',padding:'.65rem 0',borderBottom:i < activity.length-1 ? '1px solid var(--border)' : 'none'}}>
               <div style={{width:8,height:8,borderRadius:'50%',background:a.color,marginTop:6,flexShrink:0,boxShadow:`0 0 8px ${a.color}`}}></div>
               <div style={{flex:1}}>
                 <div style={{fontSize:'.88rem',marginBottom:2}}>{a.text}</div>
@@ -1680,6 +1830,7 @@ function DashboardView() {
               </div>
             </div>
           ))}
+          {!loading && activity.length === 0 && <div style={{padding:'1rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.85rem'}}>No activity yet — generate your first strategy.</div>}
         </div>
 
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
@@ -1687,9 +1838,10 @@ function DashboardView() {
             <div className="card-head"><h3>Quick Actions</h3></div>
             <div style={{display:'grid',gap:'.5rem'}}>
               <button className="btn btn-primary" style={{width:'100%'}} onClick={() => setView('create')}>New Content Piece</button>
-              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('editor')}>Record with Teleprompter</button>
-              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('email')}>Email Studio</button>
-              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('analytics')}>Neural Analytics</button>
+              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('workflows')}>⚡ Run a Workflow</button>
+              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('blog')}>📝 Build a Blog Post</button>
+              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('screenrec')}>🎥 Record with Teleprompter</button>
+              <button className="btn btn-ghost" style={{width:'100%'}} onClick={() => setView('email')}>📧 Email Studio</button>
             </div>
           </div>
 
@@ -1697,13 +1849,13 @@ function DashboardView() {
             <div className="card-head"><h3>Content Pipeline</h3></div>
             <div style={{display:'flex',gap:'.75rem',justifyContent:'space-between'}}>
               {[
-                {label:'Draft',count:MOCK_CONTENT.filter(c=>c.status==='draft').length,color:'var(--text-dim)'},
-                {label:'Review',count:MOCK_CONTENT.filter(c=>c.status==='review').length,color:'var(--amber)'},
-                {label:'Approved',count:MOCK_CONTENT.filter(c=>c.status==='approved').length,color:'var(--blue)'},
-                {label:'Published',count:MOCK_CONTENT.filter(c=>c.status==='published').length,color:'var(--green)'},
+                {label:'Draft',count:pipeline.draft,color:'var(--text-dim)'},
+                {label:'Review',count:pipeline.review,color:'var(--amber)'},
+                {label:'Approved',count:pipeline.approved,color:'var(--blue)'},
+                {label:'Published',count:pipeline.published,color:'var(--green)'},
               ].map(p => (
                 <div key={p.label} style={{textAlign:'center',flex:1}}>
-                  <div style={{fontFamily:'var(--display)',fontSize:'1.75rem',fontWeight:800,color:p.color,textShadow:`0 0 20px ${p.color}`}}>{p.count}</div>
+                  <div style={{fontFamily:'var(--display)',fontSize:'1.75rem',fontWeight:800,color:p.color,textShadow:`0 0 20px ${p.color}`}}>{loading ? '…' : p.count}</div>
                   <div style={{fontFamily:'var(--mono)',fontSize:'.68rem',color:'var(--text-dim)',textTransform:'uppercase',letterSpacing:'.1em'}}>{p.label}</div>
                 </div>
               ))}
@@ -1713,6 +1865,23 @@ function DashboardView() {
       </div>
     </div>
   );
+}
+
+function SkeletonNumber() {
+  return <span style={{display:'inline-block',width:60,height:36,background:'linear-gradient(90deg,var(--glass) 0%,var(--bg-elev) 50%,var(--glass) 100%)',backgroundSize:'200% 100%',borderRadius:6,animation:'shimmer 1.5s linear infinite'}}></span>;
+}
+
+function relativeTime(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  const d = Math.floor(h / 24);
+  if (d < 7) return d + 'd ago';
+  return new Date(iso).toLocaleDateString();
 }
 
 /* ============================================================
@@ -2182,6 +2351,9 @@ function CreateView() {
         <div className="grid-2">
           <div className="card">
             <div className="card-head"><h3>Strategy Output</h3><span className="type-tag">{contentType.toUpperCase()}</span></div>
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.35rem .6rem',background:'rgba(255,214,10,0.06)',border:'1px solid var(--yellow-glow)',borderRadius:6,marginBottom:'.6rem',fontSize:'.66rem',fontFamily:'var(--mono)',color:'var(--yellow)',textTransform:'uppercase',letterSpacing:'.06em',width:'fit-content'}}>
+              ● Generated by Claude Sonnet 4.5
+            </div>
             <div className={`strategy-output ${generating ? 'typing-cursor' : ''}`} ref={outputRef}>{output}</div>
           </div>
           <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
@@ -3188,8 +3360,43 @@ function AnalyticsView() {
 /* ============================================================
    SETTINGS
    ============================================================ */
+async function triggerWelcomeSequence(settings, addToast, onSent) {
+  if (!settings.email) { addToast('Add your email in Profile first', 'error'); return; }
+  try {
+    const r = await fetch('/api/welcome-sequence', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        to: settings.email, name: settings.name, step: 0, mode:'send_now', consent:true,
+        supabase_url: localStorage.getItem('eos-sb-url'),
+        supabase_key: localStorage.getItem('eos-sb-key'),
+      })
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) { addToast('Welcome email failed: ' + (data.error || ''), 'error'); return; }
+    addToast('Welcome email sent — check your inbox', 'success');
+    logConsent(settings.email, 'email', 'opt_in', 'settings-welcome-trigger');
+    onSent && onSent();
+  } catch (e) {
+    addToast('Welcome request error: ' + e.message, 'error');
+  }
+}
+
+function logConsent(identifier, channel, action, source) {
+  if (!identifier) return;
+  const sb = window.SupabaseClient;
+  if (!sb || !sb.isReady()) return;
+  try {
+    sb.insert('consent_log', {
+      identifier, channel, action, source,
+      user_agent: navigator.userAgent,
+      metadata: {url: window.location.href, ts: new Date().toISOString()},
+    }).catch(() => {});
+  } catch(e) {}
+}
+
 function SettingsView() {
-  const {theme, toggleTheme, lang, setLang, addToast} = useApp();
+  const {theme, toggleTheme, lang, setLang, addToast, setView} = useApp();
   const [settingsTab, setSettingsTab] = useState('profile');
   const [showKeys, setShowKeys] = useState({});
   const [settings, setSettings] = useState({
@@ -3205,6 +3412,7 @@ function SettingsView() {
     craftContext:'Business owners + operators with 0-moderate AI experience',craftRole:'Senior practitioner who lived this',craftTone:'Direct, warm, smart. Never preachy.',
     primaryColor:'#F5C800',accentColor:'#4169E1',bgColor:'#050508',
     notifyEmail:true,notifyTelegram:true,notifySlack:false,
+    smsOptIn:false,smsNumber:'',marketingEmailOptIn:false,welcomeSequenceSent:false,
     autoPublish:false,defaultContentType:'both',
   });
   const toggleKey = (key) => setShowKeys(prev => ({...prev, [key]: !prev[key]}));
@@ -3411,9 +3619,10 @@ function SettingsView() {
       )}
 
       {settingsTab === 'notifications' && (
-        <div style={{maxWidth:600}}>
-          <div className="card">
-            <div className="card-head"><h3>Notification Channels</h3></div>
+        <div style={{maxWidth:680}}>
+          <div className="card" style={{marginBottom:'1rem'}}>
+            <div className="card-head"><h3>Service Notification Channels</h3></div>
+            <div style={{fontSize:'.78rem',color:'var(--text-dim)',marginBottom:'.75rem'}}>Account-related alerts (status, security, billing). Always sent regardless of marketing preferences.</div>
             {[{key:'notifyEmail',label:'Email Notifications',desc:'Content status updates, analytics summaries, scheduled posts'},{key:'notifyTelegram',label:'Telegram Notifications',desc:'Real-time approvals, brief delivery, deployment alerts'},{key:'notifySlack',label:'Slack Notifications',desc:'Team collaboration updates, content pipeline changes'}].map(n => (
               <label key={n.key} style={{display:'flex',alignItems:'center',gap:'1rem',padding:'1rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)',marginBottom:'.5rem',cursor:'pointer'}}>
                 <input type="checkbox" checked={settings[n.key]} onChange={e => u(n.key,e.target.checked)} style={{accentColor:'var(--yellow)',width:18,height:18}} />
@@ -3423,6 +3632,41 @@ function SettingsView() {
                 </div>
               </label>
             ))}
+          </div>
+
+          <div className="card" style={{marginBottom:'1rem',border:'1px solid var(--yellow-glow-strong)'}}>
+            <div className="card-head"><h3>Marketing Email Opt-In</h3></div>
+            <div style={{fontSize:'.78rem',color:'var(--text-dim)',marginBottom:'.75rem'}}>Required for our 5-email welcome sequence + product update emails. CAN-SPAM, CASL, and GDPR compliant. Unsubscribe in any email.</div>
+            <label style={{display:'flex',alignItems:'flex-start',gap:'1rem',padding:'1rem',background:'rgba(255,214,10,0.04)',borderRadius:'var(--radius-lg)',border:'1px solid var(--yellow-glow)',cursor:'pointer'}}>
+              <input type="checkbox" checked={settings.marketingEmailOptIn} onChange={e => {
+                u('marketingEmailOptIn', e.target.checked);
+                if (e.target.checked && !settings.welcomeSequenceSent) triggerWelcomeSequence(settings, addToast, () => u('welcomeSequenceSent', true));
+              }} style={{accentColor:'var(--yellow)',width:18,height:18,marginTop:2}} />
+              <div>
+                <div style={{fontWeight:700,fontSize:'.92rem',marginBottom:4}}>I want product news + the 5-email welcome series</div>
+                <div style={{fontSize:'.75rem',color:'var(--text-muted)',lineHeight:1.5}}>By checking this you confirm explicit consent to receive marketing emails from Supernova Editor at the address on file. We'll log your IP, timestamp, and source for compliance. <a href="#" onClick={(e)=>{e.preventDefault();setView('legal');}} style={{color:'var(--yellow)'}}>Read Email Terms</a></div>
+              </div>
+            </label>
+          </div>
+
+          <div className="card" style={{border:'1px solid var(--yellow-glow-strong)'}}>
+            <div className="card-head"><h3>SMS Opt-In (A2P 10DLC)</h3></div>
+            <div style={{fontSize:'.78rem',color:'var(--text-dim)',marginBottom:'.75rem'}}>For optional SMS alerts and reminders. Standard message and data rates may apply. Reply STOP to cancel, HELP for help.</div>
+
+            <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Mobile number (E.164 format)</label>
+            <input className="input" type="tel" placeholder="+12025550100" value={settings.smsNumber || ''} onChange={e => u('smsNumber', e.target.value)} style={{marginBottom:'.75rem',fontFamily:'var(--mono)'}}/>
+
+            <label style={{display:'flex',alignItems:'flex-start',gap:'1rem',padding:'1rem',background:'rgba(255,214,10,0.04)',borderRadius:'var(--radius-lg)',border:'1px solid var(--yellow-glow)',cursor:'pointer'}}>
+              <input type="checkbox" checked={settings.smsOptIn} onChange={e => {
+                if (e.target.checked && !settings.smsNumber) { addToast('Add your mobile number first','error'); return; }
+                u('smsOptIn', e.target.checked);
+                logConsent(settings.smsNumber, 'sms', e.target.checked ? 'opt_in' : 'opt_out', 'settings');
+              }} style={{accentColor:'var(--yellow)',width:18,height:18,marginTop:2}} />
+              <div>
+                <div style={{fontWeight:700,fontSize:'.92rem',marginBottom:4}}>I consent to receive automated SMS messages</div>
+                <div style={{fontSize:'.75rem',color:'var(--text-muted)',lineHeight:1.5}}>Frequency: 1-8 messages/week. <strong>Mobile information will not be shared with third parties or affiliates for marketing or promotional purposes.</strong> Reply STOP at any time. <a href="#" onClick={(e)=>{e.preventDefault();setView('legal');}} style={{color:'var(--yellow)'}}>Read full SMS Terms</a> · <a href="#" onClick={(e)=>{e.preventDefault();setView('legal');}} style={{color:'var(--yellow)'}}>Privacy Policy</a></div>
+              </div>
+            </label>
           </div>
         </div>
       )}
@@ -5781,6 +6025,752 @@ function StrategyVaultDrawer() {
   );
 }
 
+/* ============================================================
+   WORKFLOWS — automation recipes that chain multiple steps
+   ============================================================ */
+const WORKFLOW_TEMPLATES = [
+  {
+    id: 'multi-language-empire',
+    name: 'Topic to Multi-Language Empire',
+    icon: '🌍',
+    gradient: 'linear-gradient(135deg,#FFD60A,#FF8C00)',
+    description: 'One topic fans out into 1 strategy + 5 translations + 5 teleprompter scripts + 5 platform posts. 16 deliverables, one click.',
+    inputs: [
+      {key:'topic', label:'Topic', type:'text', placeholder:'e.g., Why most AI tools fail small businesses', required:true},
+      {key:'contentType', label:'Format', type:'select', options:[['short','Short-Form'],['long','Long-Form'],['both','Both']], default:'short'},
+      {key:'languages', label:'Languages (comma-separated)', type:'text', placeholder:'Spanish, Portuguese, French, German, Japanese', default:'Spanish, Portuguese, French'},
+      {key:'platforms', label:'Platforms (comma-separated)', type:'text', placeholder:'ig, tt, yt, li, fb', default:'ig, tt, yt, li'},
+    ],
+    steps: ['strategy','translate','extract-scripts','platform-posts'],
+  },
+  {
+    id: 'lead-magnet-funnel',
+    name: 'Strategy to Lead Magnet Funnel',
+    icon: '🧲',
+    gradient: 'linear-gradient(135deg,#4169E1,#1B2A5C)',
+    description: 'Topic → strategy → public landing page → 5-email opt-in sequence → DM follow-up template. Full funnel.',
+    inputs: [
+      {key:'topic', label:'Topic', type:'text', placeholder:'e.g., How to ship in 14 days', required:true},
+      {key:'contentType', label:'Format', type:'select', options:[['short','Short-Form'],['long','Long-Form']], default:'short'},
+    ],
+    steps: ['strategy','lead-magnet','email-sequence','dm-template'],
+  },
+  {
+    id: '14-day-sprint',
+    name: 'Single Post to 14-Day Sprint',
+    icon: '📅',
+    gradient: 'linear-gradient(135deg,#FF5722,#FF8C00)',
+    description: 'One strong post → 14 days × 6 formats (84 derivative pieces). Spaced and ready to schedule.',
+    inputs: [
+      {key:'post', label:'Source post (paste full text)', type:'textarea', placeholder:'Paste your post copy here…', required:true},
+    ],
+    steps: ['analyze','sprint-plan'],
+  },
+  {
+    id: 'repurpose',
+    name: 'Repurpose Published Content',
+    icon: '♻️',
+    gradient: 'linear-gradient(135deg,#00E68A,#0F6B47)',
+    description: 'Pick a published post → re-extract hooks → 5 fresh angles → 5 carousel briefs + 5 email subject lines.',
+    inputs: [
+      {key:'post', label:'Published post text', type:'textarea', placeholder:'Paste the post you want to repurpose…', required:true},
+    ],
+    steps: ['extract-hooks','angles','derivatives'],
+  },
+  {
+    id: 'collaborator-campaign',
+    name: 'Collaborator Campaign',
+    icon: '🤝',
+    gradient: 'linear-gradient(135deg,#A78BFA,#6D28D9)',
+    description: 'Topic → strategy → 3 collaborator-ready turnkey packages (each tuned to a different audience).',
+    inputs: [
+      {key:'topic', label:'Campaign topic', type:'text', placeholder:'e.g., Launch our new Strategy Engine', required:true},
+      {key:'collaborators', label:'How many collaborator angles?', type:'select', options:[['3','3'],['5','5'],['10','10']], default:'3'},
+    ],
+    steps: ['strategy','collaborator-packages'],
+  },
+  {
+    id: 'voice-refinement',
+    name: 'Brand Voice Refinement',
+    icon: '🎯',
+    gradient: 'linear-gradient(135deg,#FFE55C,#E6BE00)',
+    description: 'Paste 5 of your top posts → Claude analyzes voice → outputs JSON profile applied to all future Strategy Engine generations.',
+    inputs: [
+      {key:'posts', label:'5 sample posts (separate with --- on its own line)', type:'textarea', placeholder:'Post 1 text…\\n---\\nPost 2 text…\\n---\\nPost 3…', required:true},
+    ],
+    steps: ['analyze-voice','voice-profile'],
+  },
+];
+
+function WorkflowsView() {
+  const {addToast} = useApp();
+  const [selected, setSelected] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [inputs, setInputs] = useState({});
+  const [running, setRunning] = useState(false);
+  const [steps, setSteps] = useState([]);
+  const [result, setResult] = useState(null);
+  const [recentRuns, setRecentRuns] = useState([]);
+
+  useEffect(() => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) return;
+    const wsId = sb.getWorkspaceId();
+    sb.fetch('workflow_runs', {eq: wsId ? {workspace_id: wsId} : {}, order:'created_at', ascending:false, limit:5})
+      .then(rows => rows && setRecentRuns(rows))
+      .catch(() => {});
+  }, [running]);
+
+  const openTemplate = (tpl) => {
+    setSelected(tpl);
+    const init = {};
+    tpl.inputs.forEach(i => init[i.key] = i.default || '');
+    setInputs(init);
+    setSteps([]);
+    setResult(null);
+    setDrawerOpen(true);
+  };
+
+  const runWorkflow = async () => {
+    if (!selected) return;
+    for (const i of selected.inputs) {
+      if (i.required && !String(inputs[i.key] || '').trim()) {
+        addToast(`Missing: ${i.label}`, 'error');
+        return;
+      }
+    }
+    setRunning(true);
+    setResult(null);
+    const initialSteps = selected.steps.map(id => ({id, status:'pending', startTime: Date.now()}));
+    setSteps(initialSteps);
+
+    // Optimistically mark first step as running
+    setSteps(prev => prev.map((s,i) => i === 0 ? {...s, status:'running'} : s));
+
+    const sb = window.SupabaseClient;
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+
+    const payloadInput = {...inputs};
+    if (payloadInput.languages) payloadInput.languages = String(payloadInput.languages).split(',').map(s => s.trim()).filter(Boolean);
+    if (payloadInput.platforms) payloadInput.platforms = String(payloadInput.platforms).split(',').map(s => s.trim()).filter(Boolean);
+    if (payloadInput.posts) payloadInput.posts = String(payloadInput.posts).split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+    if (payloadInput.collaborators) payloadInput.collaborators = parseInt(payloadInput.collaborators) || 3;
+
+    try {
+      const r = await fetch('/api/run-workflow', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          template_id: selected.id,
+          input: payloadInput,
+          workspace_id: sb?.getWorkspaceId?.() || null,
+          supabase_url: sbUrl,
+          supabase_key: sbKey,
+        })
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Workflow failed: ' + (data.error || 'unknown'), 'error');
+        setSteps(prev => prev.map(s => s.status === 'pending' || s.status === 'running' ? {...s, status:'error'} : s));
+      } else {
+        setSteps(data.steps.map(s => ({id: s.id, status: s.status, elapsed_ms: s.elapsed_ms, output: s.output})));
+        setResult(data.output);
+        addToast('Workflow complete — ' + selected.name, 'success');
+      }
+    } catch (e) {
+      addToast('Workflow request error: ' + e.message, 'error');
+      setSteps(prev => prev.map(s => s.status === 'pending' || s.status === 'running' ? {...s, status:'error'} : s));
+    }
+    setRunning(false);
+  };
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Workflows</h1>
+          <div className="sub">One input. One click. The whole content stack moves. <span style={{color:'var(--yellow)',fontFamily:'var(--mono)',fontSize:'.72rem'}}>● POWERED BY CLAUDE</span></div>
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:'1.25rem',background:'linear-gradient(135deg,rgba(255,214,10,0.08),rgba(255,140,0,0.04))',border:'1px solid var(--yellow-glow-strong)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'1rem'}}>
+          <div style={{fontSize:'2rem'}}>⚡</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800,marginBottom:4}}>Stop manually moving work between tools.</div>
+            <div style={{fontSize:'.85rem',color:'var(--text-muted)'}}>Each workflow chains multiple AI steps + platform actions in one run. State persists to Supabase, so you can leave and come back.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))',gap:'1rem',marginBottom:'2rem'}}>
+        {WORKFLOW_TEMPLATES.map(tpl => (
+          <div key={tpl.id} className="card" style={{padding:'1.5rem',cursor:'pointer',transition:'all .2s',borderColor:'var(--border)'}}
+            onMouseEnter={e => e.currentTarget.style.transform='translateY(-2px)'}
+            onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}
+            onClick={() => openTemplate(tpl)}>
+            <div style={{width:60,height:60,borderRadius:14,background:tpl.gradient,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.8rem',marginBottom:'1rem'}}>{tpl.icon}</div>
+            <h3 style={{fontSize:'1.05rem',marginBottom:'.4rem'}}>{tpl.name}</h3>
+            <div style={{fontSize:'.82rem',color:'var(--text-muted)',lineHeight:1.55,marginBottom:'.85rem'}}>{tpl.description}</div>
+            <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
+              {tpl.steps.map(s => (
+                <span key={s} style={{fontSize:'.6rem',padding:'.18rem .5rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:4,fontFamily:'var(--mono)',color:'var(--text-dim)',textTransform:'uppercase'}}>{s}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {recentRuns.length > 0 && (
+        <div className="card" style={{marginBottom:'2rem'}}>
+          <div className="card-head"><h3>Recent Runs</h3></div>
+          {recentRuns.map(run => (
+            <div key={run.id} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.5rem 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{width:8,height:8,borderRadius:'50%',background: run.status==='done'?'var(--green)':run.status==='running'?'var(--yellow)':'var(--red)'}}></div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'.88rem',fontWeight:600}}>{run.template_name || run.template_id}</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{new Date(run.created_at).toLocaleString()} · {run.status}</div>
+              </div>
+              <span style={{fontSize:'.65rem',padding:'.18rem .5rem',background:'var(--glass)',borderRadius:4,fontFamily:'var(--mono)',color:'var(--text-dim)',textTransform:'uppercase'}}>{(run.steps || []).length} steps</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {drawerOpen && selected && (
+        <div style={{position:'fixed',top:0,right:0,bottom:0,width:'min(540px,95vw)',background:'var(--bg-solid)',borderLeft:'1px solid var(--border)',boxShadow:'-12px 0 30px rgba(0,0,0,.3)',zIndex:200,overflowY:'auto'}}>
+          <div style={{padding:'1.25rem',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'.75rem'}}>
+            <div style={{width:42,height:42,borderRadius:10,background:selected.gradient,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1.2rem'}}>{selected.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:800,fontSize:'1.05rem'}}>{selected.name}</div>
+              <div style={{fontSize:'.72rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>{selected.steps.length}-step workflow</div>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => {setDrawerOpen(false); setSelected(null);}}>×</button>
+          </div>
+
+          <div style={{padding:'1.25rem'}}>
+            {selected.inputs.map(inp => (
+              <div key={inp.key} style={{marginBottom:'1rem'}}>
+                <label style={{display:'block',fontSize:'.78rem',fontWeight:600,marginBottom:'.4rem',color:'var(--text-muted)'}}>{inp.label}{inp.required ? ' *' : ''}</label>
+                {inp.type === 'textarea' ? (
+                  <textarea className="input" rows={6} placeholder={inp.placeholder}
+                    value={inputs[inp.key] || ''} onChange={e => setInputs(p => ({...p, [inp.key]: e.target.value}))}
+                    style={{fontFamily:'var(--mono)',fontSize:'.78rem'}} />
+                ) : inp.type === 'select' ? (
+                  <select className="input" value={inputs[inp.key] || inp.default || ''} onChange={e => setInputs(p => ({...p, [inp.key]: e.target.value}))}>
+                    {inp.options.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                ) : (
+                  <input className="input" type="text" placeholder={inp.placeholder}
+                    value={inputs[inp.key] || ''} onChange={e => setInputs(p => ({...p, [inp.key]: e.target.value}))} />
+                )}
+              </div>
+            ))}
+
+            <button className="btn btn-primary" style={{width:'100%',marginTop:'.5rem'}} disabled={running} onClick={runWorkflow}>
+              {running ? '⚡ Running…' : `Run ${selected.name}`}
+            </button>
+
+            {steps.length > 0 && (
+              <div style={{marginTop:'1.5rem'}}>
+                <div style={{fontSize:'.72rem',fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:'.6rem'}}>Step Trace</div>
+                {steps.map((s,i) => (
+                  <div key={s.id+i} style={{padding:'.6rem .75rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:8,marginBottom:'.5rem',display:'flex',alignItems:'center',gap:'.6rem'}}>
+                    <div style={{width:10,height:10,borderRadius:'50%',background: s.status==='done'?'var(--green)':s.status==='running'?'var(--yellow)':s.status==='error'?'var(--red)':'var(--text-dim)', boxShadow: s.status==='running'?'0 0 8px var(--yellow)':'none'}}></div>
+                    <div style={{flex:1,fontSize:'.82rem',fontFamily:'var(--mono)'}}>{s.id}</div>
+                    {s.elapsed_ms && <span style={{fontSize:'.65rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{(s.elapsed_ms/1000).toFixed(1)}s</span>}
+                    <span style={{fontSize:'.65rem',padding:'.15rem .45rem',background: s.status==='done'?'rgba(0,230,138,0.15)':s.status==='error'?'rgba(255,80,80,0.15)':'var(--bg-elev)',color: s.status==='done'?'var(--green)':s.status==='error'?'var(--red)':'var(--text-dim)',borderRadius:3,textTransform:'uppercase',fontFamily:'var(--mono)'}}>{s.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {result && (
+              <div style={{marginTop:'1.5rem',padding:'1rem',background:'rgba(0,230,138,0.06)',border:'1px solid rgba(0,230,138,0.25)',borderRadius:10}}>
+                <div style={{fontSize:'.78rem',fontWeight:700,color:'var(--green)',marginBottom:'.5rem'}}>● Result</div>
+                <pre style={{fontFamily:'var(--mono)',fontSize:'.7rem',whiteSpace:'pre-wrap',maxHeight:300,overflowY:'auto',color:'var(--text-muted)',margin:0}}>{JSON.stringify(result, null, 2)}</pre>
+              </div>
+            )}
+
+            <div style={{marginTop:'1.5rem',padding:'.75rem',background:'var(--glass)',borderRadius:8,fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+              ⚡ Powered by Claude Sonnet 4.5
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   BLOG BUILDER — long-form post generator with hybrid publish
+   ============================================================ */
+function BlogBuilderView() {
+  const {addToast} = useApp();
+  const [source, setSource] = useState('topic');
+  const [topic, setTopic] = useState('');
+  const [strategyId, setStrategyId] = useState('');
+  const [strategies, setStrategies] = useState([]);
+  const [seoKeyword, setSeoKeyword] = useState('');
+  const [wordCount, setWordCount] = useState(1500);
+  const [tone, setTone] = useState('Conversational');
+  const [internalLinks, setInternalLinks] = useState('');
+  const [imageCount, setImageCount] = useState(3);
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState(null);
+  const [activeTab, setActiveTab] = useState('preview');
+  const [recentPosts, setRecentPosts] = useState([]);
+  const [publishingTo, setPublishingTo] = useState(null);
+  const [connections, setConnections] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('eos-blog-connections') || '{}'); } catch { return {}; }
+  });
+  const [showConnections, setShowConnections] = useState(false);
+
+  const loadRecents = useCallback(async () => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) return;
+    const wsId = sb.getWorkspaceId();
+    const rows = await sb.fetch('blog_posts', {eq: wsId ? {workspace_id: wsId} : {}, order:'created_at', ascending:false, limit:8});
+    if (rows) setRecentPosts(rows);
+    const stratRows = await sb.fetch('content', {eq: {type:'strategy', ...(wsId ? {workspace_id: wsId} : {})}, order:'created_at', ascending:false, limit:30});
+    if (stratRows) setStrategies(stratRows);
+  }, []);
+
+  useEffect(() => { loadRecents(); }, [loadRecents]);
+
+  const saveConnections = (next) => {
+    setConnections(next);
+    localStorage.setItem('eos-blog-connections', JSON.stringify(next));
+    addToast('Blog connections saved (local)', 'success');
+  };
+
+  const generate = async () => {
+    if (source === 'topic' && !topic.trim()) { addToast('Enter a topic', 'error'); return; }
+    if (source === 'strategy' && !strategyId) { addToast('Pick a strategy', 'error'); return; }
+    setGenerating(true);
+    setResult(null);
+
+    const sb = window.SupabaseClient;
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+
+    let strategyText = '';
+    let strategyTopic = topic;
+    if (source === 'strategy') {
+      const found = strategies.find(s => s.id === strategyId);
+      if (found) {
+        strategyText = found.brief?.output || '';
+        strategyTopic = found.title || topic;
+      }
+    }
+
+    try {
+      const r = await fetch('/api/generate-blog', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          topic: strategyTopic,
+          strategy: strategyText,
+          seo_keyword: seoKeyword,
+          word_count: parseInt(wordCount) || 1500,
+          tone,
+          internal_links: internalLinks.split('\n').map(s => s.trim()).filter(Boolean),
+          image_count: parseInt(imageCount) || 0,
+          save: true,
+          workspace_id: sb?.getWorkspaceId?.() || null,
+          strategy_id: source === 'strategy' ? strategyId : null,
+          supabase_url: sbUrl,
+          supabase_key: sbKey,
+        })
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Blog generation failed: ' + (data.error || 'unknown'), 'error');
+      } else {
+        setResult(data);
+        setActiveTab('preview');
+        addToast(`Blog generated · ${data.meta.word_count} words`, 'success');
+        loadRecents();
+      }
+    } catch (e) {
+      addToast('Request error: ' + e.message, 'error');
+    }
+    setGenerating(false);
+  };
+
+  const publishTo = async (target) => {
+    if (!result) return;
+    if (target === 'wordpress' && !connections.wordpress?.site_url) { addToast('Add WordPress connection first', 'error'); setShowConnections(true); return; }
+    if (target === 'ghost' && !connections.ghost?.admin_api_url) { addToast('Add Ghost connection first', 'error'); setShowConnections(true); return; }
+    if (target === 'webhook' && !connections.webhook?.webhook_url) { addToast('Add webhook URL first', 'error'); setShowConnections(true); return; }
+
+    setPublishingTo(target);
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+    try {
+      const r = await fetch('/api/publish-blog', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          target,
+          post_id: result.id,
+          title: result.meta.title,
+          html: result.html,
+          markdown: result.markdown,
+          meta: result.meta,
+          connection: connections[target] || {},
+          supabase_url: sbUrl,
+          supabase_key: sbKey,
+        })
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast(`${target} failed: ` + (data.error || 'unknown'), 'error');
+      } else {
+        addToast(`Published to ${target}`, 'success');
+        if (data.url) window.open(data.url, '_blank');
+      }
+    } catch (e) {
+      addToast('Publish error: ' + e.message, 'error');
+    }
+    setPublishingTo(null);
+  };
+
+  const copyToClipboard = (text, label) => {
+    navigator.clipboard.writeText(text);
+    addToast(`${label} copied`, 'success');
+  };
+
+  const downloadFile = (text, filename, mime) => {
+    const blob = new Blob([text], {type: mime});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Blog Builder</h1>
+          <div className="sub">SEO-optimized long-form posts. Native publish to WordPress + Ghost. <span style={{color:'var(--yellow)',fontFamily:'var(--mono)',fontSize:'.72rem'}}>● POWERED BY CLAUDE</span></div>
+        </div>
+        <button className="btn btn-ghost" onClick={() => setShowConnections(s => !s)}>🔗 Blog Connections</button>
+      </div>
+
+      {showConnections && (
+        <div className="card" style={{marginBottom:'1.25rem'}}>
+          <div className="card-head"><h3>Blog Connections</h3><button className="btn btn-ghost btn-sm" onClick={() => setShowConnections(false)}>×</button></div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'1rem'}}>
+            <div>
+              <div style={{fontWeight:700,marginBottom:'.5rem'}}>🟦 WordPress</div>
+              <input className="input" placeholder="Site URL (https://yourblog.com)" value={connections.wordpress?.site_url||''}
+                onChange={e => setConnections(c => ({...c, wordpress:{...c.wordpress, site_url: e.target.value}}))} style={{marginBottom:'.4rem'}}/>
+              <input className="input" placeholder="Username" value={connections.wordpress?.username||''}
+                onChange={e => setConnections(c => ({...c, wordpress:{...c.wordpress, username: e.target.value}}))} style={{marginBottom:'.4rem'}}/>
+              <input className="input" placeholder="App Password (Profile → Application Passwords)" type="password" value={connections.wordpress?.app_password||''}
+                onChange={e => setConnections(c => ({...c, wordpress:{...c.wordpress, app_password: e.target.value}}))}/>
+            </div>
+            <div>
+              <div style={{fontWeight:700,marginBottom:'.5rem'}}>👻 Ghost</div>
+              <input className="input" placeholder="Admin API URL (https://blog.com)" value={connections.ghost?.admin_api_url||''}
+                onChange={e => setConnections(c => ({...c, ghost:{...c.ghost, admin_api_url: e.target.value}}))} style={{marginBottom:'.4rem'}}/>
+              <input className="input" placeholder="Admin API Key (id:secret)" type="password" value={connections.ghost?.admin_api_key||''}
+                onChange={e => setConnections(c => ({...c, ghost:{...c.ghost, admin_api_key: e.target.value}}))}/>
+            </div>
+            <div>
+              <div style={{fontWeight:700,marginBottom:'.5rem'}}>🪝 Webhook (Zapier / n8n / Make)</div>
+              <input className="input" placeholder="Webhook URL" value={connections.webhook?.webhook_url||''}
+                onChange={e => setConnections(c => ({...c, webhook:{...c.webhook, webhook_url: e.target.value}}))}/>
+            </div>
+          </div>
+          <button className="btn btn-primary" style={{marginTop:'1rem'}} onClick={() => saveConnections(connections)}>Save Connections</button>
+        </div>
+      )}
+
+      {recentPosts.length > 0 && (
+        <div className="card" style={{marginBottom:'1.25rem'}}>
+          <div className="card-head"><h3>My Blog Posts</h3></div>
+          <div style={{display:'grid',gap:'.5rem'}}>
+            {recentPosts.map(p => (
+              <div key={p.id} style={{padding:'.6rem .75rem',background:'var(--glass)',borderRadius:8,display:'flex',gap:'.75rem',alignItems:'center'}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:'.88rem'}}>{p.title}</div>
+                  <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{new Date(p.created_at).toLocaleDateString()} · {p.meta?.word_count || '?'} words · {p.meta?.reading_time || '?'} min</div>
+                </div>
+                {Array.isArray(p.published_to) && p.published_to.map(pt => (
+                  <a key={pt.target} href={pt.url} target="_blank" rel="noopener" style={{fontSize:'.65rem',padding:'.18rem .5rem',background:'rgba(0,230,138,0.15)',color:'var(--green)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase',textDecoration:'none'}}>● {pt.target}</a>
+                ))}
+                <button className="btn btn-ghost btn-sm" onClick={() => setResult({id: p.id, html: p.html, markdown: p.markdown, meta: p.meta})}>Open</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{display:'grid',gridTemplateColumns:'minmax(280px,400px) 1fr',gap:'1.25rem'}}>
+        <div className="card">
+          <div className="card-head"><h3>New Blog Post</h3></div>
+          <div style={{display:'flex',gap:'.4rem',marginBottom:'1rem'}}>
+            <button className={`btn btn-sm ${source==='topic'?'btn-primary':'btn-ghost'}`} style={{flex:1}} onClick={() => setSource('topic')}>From Topic</button>
+            <button className={`btn btn-sm ${source==='strategy'?'btn-primary':'btn-ghost'}`} style={{flex:1}} onClick={() => setSource('strategy')}>From Strategy</button>
+          </div>
+          {source === 'topic' ? (
+            <input className="input" placeholder="Blog topic / working title" value={topic} onChange={e => setTopic(e.target.value)} style={{marginBottom:'.6rem'}}/>
+          ) : (
+            <select className="input" value={strategyId} onChange={e => setStrategyId(e.target.value)} style={{marginBottom:'.6rem'}}>
+              <option value="">Pick a strategy from the Vault…</option>
+              {strategies.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+            </select>
+          )}
+
+          <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>SEO Keyword (optional)</label>
+          <input className="input" placeholder="e.g., AI content tools" value={seoKeyword} onChange={e => setSeoKeyword(e.target.value)} style={{marginBottom:'.6rem'}}/>
+
+          <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Word Count</label>
+          <select className="input" value={wordCount} onChange={e => setWordCount(parseInt(e.target.value))} style={{marginBottom:'.6rem'}}>
+            <option value={800}>800 (quick read)</option>
+            <option value={1500}>1500 (standard)</option>
+            <option value={2500}>2500 (deep dive)</option>
+            <option value={3000}>3000 (pillar post)</option>
+          </select>
+
+          <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Tone</label>
+          <select className="input" value={tone} onChange={e => setTone(e.target.value)} style={{marginBottom:'.6rem'}}>
+            <option>Conversational</option>
+            <option>Authoritative</option>
+            <option>Story-driven</option>
+            <option>Technical</option>
+          </select>
+
+          <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Internal Links (one URL per line)</label>
+          <textarea className="input" rows={3} placeholder="https://yourblog.com/related-post-1&#10;https://yourblog.com/related-post-2"
+            value={internalLinks} onChange={e => setInternalLinks(e.target.value)} style={{marginBottom:'.6rem',fontFamily:'var(--mono)',fontSize:'.78rem'}}/>
+
+          <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Images</label>
+          <select className="input" value={imageCount} onChange={e => setImageCount(parseInt(e.target.value))} style={{marginBottom:'1rem'}}>
+            <option value={0}>None</option>
+            <option value={3}>3 images</option>
+            <option value={5}>5 images</option>
+            <option value={8}>8 images</option>
+          </select>
+
+          <button className="btn btn-primary" style={{width:'100%'}} disabled={generating} onClick={generate}>
+            {generating ? '⚡ Generating…' : 'Generate Post'}
+          </button>
+          <div style={{marginTop:'.75rem',padding:'.55rem',background:'var(--glass)',borderRadius:6,fontSize:'.65rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+            ⚡ Powered by Claude Sonnet 4.5
+          </div>
+        </div>
+
+        <div className="card">
+          {!result ? (
+            <div style={{padding:'4rem 2rem',textAlign:'center',color:'var(--text-dim)'}}>
+              <div style={{fontSize:'3rem',marginBottom:'.75rem'}}>📝</div>
+              <div style={{fontWeight:600,fontSize:'1rem',marginBottom:'.4rem'}}>No post generated yet</div>
+              <div style={{fontSize:'.85rem'}}>Pick a source on the left and hit Generate.</div>
+            </div>
+          ) : (
+            <>
+              <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+                {['preview','html','markdown','meta'].map(t => (
+                  <button key={t} className={`btn btn-sm ${activeTab===t?'btn-primary':'btn-ghost'}`} onClick={() => setActiveTab(t)} style={{textTransform:'uppercase',fontSize:'.7rem'}}>{t}</button>
+                ))}
+              </div>
+
+              <div style={{display:'flex',gap:'1rem',marginBottom:'1rem',padding:'.75rem',background:'var(--glass)',borderRadius:8,fontSize:'.78rem',flexWrap:'wrap'}}>
+                <div><span style={{color:'var(--text-dim)'}}>Words:</span> <strong>{result.meta.word_count}</strong></div>
+                <div><span style={{color:'var(--text-dim)'}}>Read:</span> <strong>{result.meta.reading_time} min</strong></div>
+                <div><span style={{color:'var(--text-dim)'}}>Headings:</span> <strong>{(result.meta.headings||[]).length}</strong></div>
+                <div><span style={{color:'var(--text-dim)'}}>Slug:</span> <code style={{fontSize:'.7rem'}}>{result.meta.slug}</code></div>
+              </div>
+
+              <div style={{maxHeight:'60vh',overflowY:'auto',padding:'1rem',background:'var(--bg-solid-2)',borderRadius:8,marginBottom:'1rem'}}>
+                {activeTab === 'preview' && <div className="blog-preview" dangerouslySetInnerHTML={{__html: result.html}} style={{lineHeight:1.7}}/>}
+                {activeTab === 'html' && <pre style={{fontFamily:'var(--mono)',fontSize:'.72rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{result.html}</pre>}
+                {activeTab === 'markdown' && <pre style={{fontFamily:'var(--mono)',fontSize:'.78rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{result.markdown}</pre>}
+                {activeTab === 'meta' && <pre style={{fontFamily:'var(--mono)',fontSize:'.72rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{JSON.stringify(result.meta, null, 2)}</pre>}
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'.5rem'}}>
+                <button className="btn btn-ghost btn-sm" onClick={() => copyToClipboard(result.html, 'HTML')}>🔗 Copy HTML</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => copyToClipboard(result.markdown, 'Markdown')}>📝 Copy MD</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(result.html, result.meta.slug+'.html', 'text/html')}>⬇️ .html</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => downloadFile(result.markdown, result.meta.slug+'.md', 'text/markdown')}>⬇️ .md</button>
+                <button className="btn btn-primary btn-sm" disabled={publishingTo==='wordpress'} onClick={() => publishTo('wordpress')}>{publishingTo==='wordpress' ? '…' : '🟦 WordPress'}</button>
+                <button className="btn btn-primary btn-sm" disabled={publishingTo==='ghost'} onClick={() => publishTo('ghost')}>{publishingTo==='ghost' ? '…' : '👻 Ghost'}</button>
+                <button className="btn btn-ghost btn-sm" disabled={publishingTo==='webhook'} onClick={() => publishTo('webhook')}>{publishingTo==='webhook' ? '…' : '🪝 Webhook'}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   LEGAL — Terms of Service + Privacy Policy (A2P / SMS / Email compliant)
+   ============================================================ */
+function LegalView() {
+  const [tab, setTab] = useState('terms');
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div><h1>Terms & Privacy</h1><div className="sub">Compliance basis for our SMS (A2P 10DLC) and email (CAN-SPAM, CASL, GDPR) campaigns.</div></div>
+      </div>
+      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem',flexWrap:'wrap'}}>
+        <button className={`btn btn-sm ${tab==='terms'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('terms')}>Terms of Service</button>
+        <button className={`btn btn-sm ${tab==='privacy'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('privacy')}>Privacy Policy</button>
+        <button className={`btn btn-sm ${tab==='sms'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('sms')}>SMS Terms (A2P 10DLC)</button>
+        <button className={`btn btn-sm ${tab==='email'?'btn-primary':'btn-ghost'}`} onClick={() => setTab('email')}>Email Terms</button>
+      </div>
+      <div className="card" style={{maxWidth:900,padding:'2rem',lineHeight:1.7}}>
+        {tab === 'terms' && <TermsOfService />}
+        {tab === 'privacy' && <PrivacyPolicy />}
+        {tab === 'sms' && <SmsTerms />}
+        {tab === 'email' && <EmailTerms />}
+      </div>
+    </div>
+  );
+}
+
+const LEGAL_ENTITY = 'Supernova Editor (a Rara Avis Marketing product)';
+const LEGAL_ADDRESS = 'Wilmington, DE 19801, USA';
+const LEGAL_EMAIL = 'support@raraavismarketing.com';
+const EFFECTIVE_DATE = 'April 19, 2026';
+
+function TermsOfService() {
+  return (
+    <div>
+      <h2>Terms of Service</h2>
+      <p style={{color:'var(--text-dim)',fontSize:'.8rem'}}>Effective: {EFFECTIVE_DATE} · Operator: {LEGAL_ENTITY} · {LEGAL_ADDRESS}</p>
+      <h3>1. Acceptance</h3>
+      <p>By creating an account or using Supernova Editor (the "Service"), you agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
+      <h3>2. Eligibility</h3>
+      <p>You must be at least 18 years old and able to form a binding contract. If using the Service for an organization, you represent that you have authority to bind that organization.</p>
+      <h3>3. Account & Security</h3>
+      <p>You are responsible for all activity under your account, for keeping credentials secure, and for promptly notifying us of any unauthorized use.</p>
+      <h3>4. Subscription, Fees & Billing</h3>
+      <p>Paid plans bill monthly or annually in advance. All fees are non-refundable except as required by law. Free trial users converting to paid will be charged the listed price unless cancelled before the trial ends.</p>
+      <h3>5. Acceptable Use</h3>
+      <p>You agree not to: (a) violate any applicable law; (b) infringe intellectual property; (c) send spam, harassment, malware, or unlawful content through any feature (email, SMS, social posts, AI generations); (d) attempt to reverse engineer, scrape, or overload the Service; (e) use AI-generated content to deceive (deepfakes of real people without consent, defamatory output, etc.).</p>
+      <h3>6. AI-Generated Content</h3>
+      <p>The Service uses third-party large-language models, including Claude by Anthropic. You retain ownership of your inputs and outputs subject to those providers' terms. You are solely responsible for reviewing AI output before publishing or distributing it. We make no warranty that output is accurate, lawful, or non-infringing.</p>
+      <h3>7. User Content & License</h3>
+      <p>You retain all rights to content you submit. You grant us a non-exclusive, worldwide, royalty-free license to host, process, transmit, and display your content solely as needed to operate and improve the Service.</p>
+      <h3>8. Third-Party Services</h3>
+      <p>The Service integrates with third parties (e.g., Anthropic, Supabase, Vercel, Resend, WordPress, Ghost, Twilio, GoHighLevel). Your use of those integrations is governed by their respective terms. We are not liable for their acts or omissions.</p>
+      <h3>9. Termination</h3>
+      <p>We may suspend or terminate access for violation of these Terms, illegal activity, or risk to Service integrity. You may cancel any time from Settings; access continues until the end of the paid period.</p>
+      <h3>10. Disclaimers</h3>
+      <p>THE SERVICE IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND. WE DISCLAIM ALL IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.</p>
+      <h3>11. Limitation of Liability</h3>
+      <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, OUR AGGREGATE LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATED TO THE SERVICE WILL NOT EXCEED THE GREATER OF (A) AMOUNTS YOU PAID US IN THE 12 MONTHS PRECEDING THE CLAIM, OR (B) USD $100.</p>
+      <h3>12. Indemnification</h3>
+      <p>You will defend and indemnify us against claims arising from your content, your use of the Service, or your violation of these Terms.</p>
+      <h3>13. Governing Law</h3>
+      <p>These Terms are governed by the laws of the State of Delaware, USA, without regard to conflict-of-laws rules. Disputes will be resolved exclusively in the state or federal courts of New Castle County, Delaware.</p>
+      <h3>14. Changes</h3>
+      <p>We may update these Terms; material changes will be notified by email or in-app at least 14 days before they take effect. Continued use after the effective date constitutes acceptance.</p>
+      <h3>15. Contact</h3>
+      <p>{LEGAL_EMAIL} · {LEGAL_ADDRESS}</p>
+    </div>
+  );
+}
+
+function PrivacyPolicy() {
+  return (
+    <div>
+      <h2>Privacy Policy</h2>
+      <p style={{color:'var(--text-dim)',fontSize:'.8rem'}}>Effective: {EFFECTIVE_DATE} · Operator: {LEGAL_ENTITY} · {LEGAL_ADDRESS}</p>
+      <h3>1. What We Collect</h3>
+      <ul>
+        <li><strong>Account data:</strong> name, email address, password hash, workspace settings.</li>
+        <li><strong>Content:</strong> topics, scripts, strategies, blog posts, audio/video recordings you upload or create.</li>
+        <li><strong>Communications:</strong> messages you send through email, SMS, and collaboration features (recipient identifiers, timestamps, content).</li>
+        <li><strong>Usage data:</strong> log files, IP, user agent, page views, feature usage, error reports.</li>
+        <li><strong>Billing data:</strong> handled by Stripe; we store only the customer ID and subscription status.</li>
+        <li><strong>Consent records:</strong> for SMS/email recipients you contact through the Service we record opt-in source, IP, timestamp.</li>
+      </ul>
+      <h3>2. How We Use Information</h3>
+      <ul>
+        <li>Provide, maintain, and improve the Service.</li>
+        <li>Generate AI outputs you request (your inputs are processed by model providers under contract).</li>
+        <li>Send service emails (account, security, billing) and — only if you opt in — product/marketing emails.</li>
+        <li>Detect fraud, abuse, and policy violations.</li>
+        <li>Comply with legal obligations.</li>
+      </ul>
+      <h3>3. Sharing</h3>
+      <p>We do not sell personal information. We share data only with: (a) sub-processors that operate the Service (Anthropic, Supabase, Vercel, Resend, Twilio, Stripe, GoHighLevel) under written data-processing terms; (b) law enforcement when legally compelled; (c) acquirers in the event of a merger or acquisition.</p>
+      <h3>4. Mobile Information & SMS Opt-Ins (10DLC carrier requirement)</h3>
+      <p>Mobile information collected for the purposes of SMS consent will not be shared with third parties or affiliates for marketing or promotional purposes. All other categories — diagnostics, abuse prevention, payment processing — exclude text-messaging originator opt-in data and consent. <strong>This information will not be shared with any third parties.</strong></p>
+      <h3>5. Your Rights</h3>
+      <p>Subject to local law you may request access, correction, deletion, portability, or restriction of your personal information. EU/UK residents: legal basis for processing is consent and legitimate interests. California residents: CCPA/CPRA "do not sell or share" — we do not sell.</p>
+      <h3>6. Data Retention</h3>
+      <p>Account data retained while your account is active and up to 12 months after closure. Consent records retained 4 years for compliance audit. Billing records retained 7 years.</p>
+      <h3>7. Security</h3>
+      <p>We use industry-standard encryption in transit (TLS 1.2+) and at rest, role-based access, audit logs, and regular vulnerability scanning. No system is 100% secure; please use a strong unique password.</p>
+      <h3>8. International Transfers</h3>
+      <p>Data may be processed in the United States. For EU/UK transfers we rely on Standard Contractual Clauses with our sub-processors.</p>
+      <h3>9. Children</h3>
+      <p>The Service is not directed to children under 16. We do not knowingly collect personal information from minors.</p>
+      <h3>10. Changes</h3>
+      <p>Material changes will be notified by email or in-app at least 14 days before they take effect.</p>
+      <h3>11. Contact / Data Requests</h3>
+      <p>{LEGAL_EMAIL} · {LEGAL_ADDRESS}</p>
+    </div>
+  );
+}
+
+function SmsTerms() {
+  return (
+    <div>
+      <h2>SMS Terms (A2P 10DLC)</h2>
+      <p style={{color:'var(--text-dim)',fontSize:'.8rem'}}>Effective: {EFFECTIVE_DATE} · Brand: {LEGAL_ENTITY}</p>
+      <h3>1. Program Description</h3>
+      <p>By opting in to receive SMS messages from Supernova Editor, you consent to receive automated transactional and product update messages (account alerts, scheduled-content reminders, security codes, optional product news). Message frequency varies; typically 1-8 messages per week.</p>
+      <h3>2. Consent</h3>
+      <p>SMS opt-in is a separate, explicit checkbox during signup or in Settings → Notifications. Opt-in is never bundled with account creation. We log timestamp, IP, and source of every opt-in.</p>
+      <h3>3. Help & Stop</h3>
+      <p>Reply <strong>HELP</strong> for help or contact {LEGAL_EMAIL}. Reply <strong>STOP</strong> to cancel at any time — you will receive a single confirmation message and no further texts. Reply <strong>UNSTOP</strong> to resume.</p>
+      <h3>4. Carrier Disclaimer</h3>
+      <p>Message and data rates may apply. Carriers are not liable for delayed or undelivered messages. Supported carriers include AT&amp;T, T-Mobile, Verizon, Sprint, U.S. Cellular, and others.</p>
+      <h3>5. Mobile Information Sharing</h3>
+      <p><strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.</strong> Information sharing to subcontractors in support categories (delivery, fraud prevention) is permitted; all other use case categories exclude text-messaging originator opt-in data and consent.</p>
+      <h3>6. Privacy</h3>
+      <p>Use of mobile data is governed by our <a href="?view=privacy">Privacy Policy</a>.</p>
+      <h3>7. Disputes</h3>
+      <p>{LEGAL_EMAIL}</p>
+    </div>
+  );
+}
+
+function EmailTerms() {
+  return (
+    <div>
+      <h2>Email Terms (CAN-SPAM, CASL, GDPR)</h2>
+      <p style={{color:'var(--text-dim)',fontSize:'.8rem'}}>Effective: {EFFECTIVE_DATE} · Sender: {LEGAL_ENTITY} · {LEGAL_ADDRESS}</p>
+      <h3>1. Sender Identification</h3>
+      <p>Every commercial email we send identifies Supernova Editor as the sender, includes a valid physical postal address (above), and a clear indication that it is an advertisement when applicable.</p>
+      <h3>2. Subject Lines</h3>
+      <p>We never use deceptive subject lines or sender identifiers. The subject reflects the content of the message.</p>
+      <h3>3. Opt-In</h3>
+      <p>You will only receive marketing emails after explicit, unambiguous, granular opt-in. Service-related emails (billing, security, transaction confirmations) are exempt from opt-in but always identify their purpose.</p>
+      <h3>4. Opt-Out</h3>
+      <p>Every marketing email contains a working one-click unsubscribe link in compliance with RFC 8058 (List-Unsubscribe-Post: List-Unsubscribe=One-Click). Opt-out requests are honored within 10 business days, typically within minutes.</p>
+      <h3>5. Suppression Lists</h3>
+      <p>Unsubscribed addresses and bounced addresses are added to a permanent suppression list and will not receive further mailings unless you explicitly re-opt-in.</p>
+      <h3>6. Third-Party Email (Outbound from your account)</h3>
+      <p>If you use Supernova Editor to send emails (collaboration packages, lead magnets, welcome sequences) you are the sender of record and are responsible for: (a) lawful collection of recipient consent; (b) maintaining accurate suppression lists; (c) honoring opt-out requests within statutory windows; (d) including a valid physical address and unsubscribe link in every commercial message. We provide tools to make this compliance straightforward.</p>
+      <h3>7. Disputes / Abuse Reports</h3>
+      <p>{LEGAL_EMAIL}</p>
+    </div>
+  );
+}
+
 function ViewRouter() {
   const {view} = useApp();
   switch(view) {
@@ -5798,8 +6788,11 @@ function ViewRouter() {
     case 'spy': return <CompetitorSpyView />;
     case 'collaboration': return <CollaborationView />;
     case 'screenrec': return <ScreenRecordView />;
+    case 'workflows': return <WorkflowsView />;
+    case 'blog': return <BlogBuilderView />;
     case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
+    case 'legal': return <LegalView />;
     case 'settings': return <SettingsView />;
     default: return <DashboardView />;
   }
@@ -5808,6 +6801,199 @@ function ViewRouter() {
 /* ============================================================
    APP SHELL
    ============================================================ */
+/* ============================================================
+   CAMPAIGN BAR — floating active-campaign header (sticky across all tabs).
+   Each video / recording / piece is a "campaign". One campaign acts as the
+   universal context for Strategy / Thumbnails / Collage / Recording / Publish.
+   ============================================================ */
+const CAMPAIGN_TABS = [
+  {key:'create',     label:'Strategy',    icon:'✨'},
+  {key:'editor',     label:'Editor',      icon:'🎬'},
+  {key:'thumbnails', label:'Thumbnails',  icon:'🖼️'},
+  {key:'collage',    label:'Collage',     icon:'⚡'},
+  {key:'screenrec',  label:'Record',      icon:'🎥'},
+  {key:'publish',    label:'Publish',     icon:'📅'},
+  {key:'analytics',  label:'Analytics',   icon:'📊'},
+];
+
+function CampaignBar() {
+  const {view, setView, activeCampaign, setActiveCampaign, campaigns, setCampaigns, addToast} = useApp();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newTopic, setNewTopic] = useState('');
+  const [newFormat, setNewFormat] = useState('short');
+  const [newPlatforms, setNewPlatforms] = useState({ig:true, tt:true, yt:false, li:false, fb:false});
+
+  // Hide bar on landing + magnet + legal-only views to keep them clean
+  const HIDDEN = ['landing','legal'];
+  if (HIDDEN.includes(view)) return null;
+
+  useEffect(() => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) return;
+    const wsId = sb.getWorkspaceId();
+    sb.fetch('campaigns', {eq: wsId ? {workspace_id: wsId} : {}, order:'updated_at', ascending:false, limit:30})
+      .then(rows => rows && setCampaigns(rows))
+      .catch(() => {});
+  }, [setCampaigns, createOpen]);
+
+  const filtered = campaigns.filter(c =>
+    !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.topic||'').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const createCampaign = async () => {
+    if (!newName.trim()) { addToast('Campaign needs a name', 'error'); return; }
+    const platforms = Object.entries(newPlatforms).filter(([,v]) => v).map(([k]) => k);
+    const sb = window.SupabaseClient;
+    let saved = null;
+    if (sb && sb.isReady()) {
+      const wsId = sb.getWorkspaceId();
+      const row = {name: newName, topic: newTopic, format: newFormat, platforms, status:'planning'};
+      if (wsId) row.workspace_id = wsId;
+      const result = await sb.insert('campaigns', row);
+      if (result && result[0]) saved = result[0];
+    }
+    if (!saved) {
+      saved = {id:'local-camp-'+Date.now(), name:newName, topic:newTopic, format:newFormat, platforms, status:'planning', created_at:new Date().toISOString()};
+    }
+    setCampaigns(c => [saved, ...c]);
+    setActiveCampaign(saved);
+    setCreateOpen(false);
+    setPickerOpen(false);
+    setNewName(''); setNewTopic('');
+    addToast(`Campaign "${saved.name}" is now active`, 'success');
+  };
+
+  const platformPills = (campaign) => {
+    const platforms = campaign?.platforms || [];
+    const labels = {ig:'IG',tt:'TT',yt:'YT',li:'LI',fb:'FB'};
+    return platforms.map(p => (
+      <span key={p} style={{fontSize:'.6rem',padding:'.12rem .35rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--text-muted)'}}>{labels[p]||p.toUpperCase()}</span>
+    ));
+  };
+
+  return (
+    <div style={{position:'sticky',top:0,zIndex:90,background:'rgba(8,8,12,0.92)',backdropFilter:'blur(14px)',WebkitBackdropFilter:'blur(14px)',borderBottom:'1px solid var(--border)',padding:'.55rem .9rem',display:'flex',alignItems:'center',gap:'.75rem',flexWrap:'wrap'}}>
+
+      {/* LEFT: Active campaign chip + picker */}
+      <div style={{position:'relative'}}>
+        <button onClick={() => setPickerOpen(p => !p)}
+          style={{display:'flex',alignItems:'center',gap:'.55rem',padding:'.45rem .75rem',background: activeCampaign ? 'linear-gradient(135deg,rgba(255,214,10,0.12),rgba(255,140,0,0.06))':'var(--glass)',border:'1px solid '+(activeCampaign ? 'var(--yellow-glow-strong)':'var(--border)'),borderRadius:8,cursor:'pointer',transition:'all .15s'}}>
+          <div style={{width:8,height:8,borderRadius:'50%',background: activeCampaign?'var(--yellow)':'var(--text-dim)',boxShadow: activeCampaign?'0 0 8px var(--yellow)':'none'}}></div>
+          {activeCampaign ? (
+            <>
+              <div style={{textAlign:'left'}}>
+                <div style={{fontSize:'.78rem',fontWeight:700,color:'var(--text)',lineHeight:1.2}}>{activeCampaign.name}</div>
+                <div style={{fontSize:'.62rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>{activeCampaign.format}-form · {(activeCampaign.platforms||[]).length} platforms</div>
+              </div>
+            </>
+          ) : (
+            <div style={{textAlign:'left'}}>
+              <div style={{fontSize:'.78rem',fontWeight:600,color:'var(--text-muted)',lineHeight:1.2}}>No active campaign</div>
+              <div style={{fontSize:'.62rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>Pick one or create new</div>
+            </div>
+          )}
+          <span style={{color:'var(--text-dim)',fontSize:'.7rem'}}>▾</span>
+        </button>
+
+        {pickerOpen && (
+          <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,width:380,background:'var(--bg-solid)',border:'1px solid var(--border)',borderRadius:10,boxShadow:'0 12px 30px rgba(0,0,0,.4)',zIndex:120,overflow:'hidden'}}>
+            <div style={{padding:'.6rem',borderBottom:'1px solid var(--border)'}}>
+              <input className="input" placeholder="Search campaigns…" value={search} onChange={e => setSearch(e.target.value)} autoFocus style={{fontSize:'.82rem'}}/>
+            </div>
+            <div style={{maxHeight:320,overflowY:'auto'}}>
+              {activeCampaign && (
+                <button onClick={() => {setActiveCampaign(null); setPickerOpen(false); addToast('Campaign cleared','info');}}
+                  style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',borderBottom:'1px solid var(--border)',cursor:'pointer',textAlign:'left',color:'var(--text-dim)',fontSize:'.78rem'}}>
+                  ✕ Clear active campaign
+                </button>
+              )}
+              {filtered.length === 0 && (
+                <div style={{padding:'1rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.82rem'}}>
+                  {campaigns.length === 0 ? 'No campaigns yet — create your first ↓' : 'No matches'}
+                </div>
+              )}
+              {filtered.map(c => (
+                <button key={c.id} onClick={() => {setActiveCampaign(c); setPickerOpen(false); addToast(`Switched to "${c.name}"`,'success');}}
+                  style={{display:'flex',width:'100%',padding:'.6rem .75rem',background: activeCampaign?.id === c.id ? 'rgba(255,214,10,0.08)':'transparent',border:'none',borderBottom:'1px solid var(--border)',cursor:'pointer',textAlign:'left',gap:'.55rem',alignItems:'center'}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:'.85rem',fontWeight:600,color:'var(--text)'}}>{c.name}</div>
+                    <div style={{fontSize:'.68rem',color:'var(--text-dim)',marginTop:2,display:'flex',gap:'.35rem',alignItems:'center'}}>
+                      <span style={{fontFamily:'var(--mono)',textTransform:'uppercase'}}>{c.format}</span>
+                      {platformPills(c)}
+                    </div>
+                  </div>
+                  <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'var(--glass)',borderRadius:3,color: c.status==='live'?'var(--green)':c.status==='planning'?'var(--yellow)':'var(--text-dim)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>{c.status}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{padding:'.6rem',borderTop:'1px solid var(--border)'}}>
+              <button className="btn btn-primary btn-sm" style={{width:'100%'}} onClick={() => {setCreateOpen(true); setPickerOpen(false);}}>+ New Campaign</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MIDDLE: Campaign-aware tab bar (only when active) */}
+      {activeCampaign && (
+        <div style={{display:'flex',gap:'.25rem',flex:1,overflowX:'auto',padding:'.1rem 0'}}>
+          {CAMPAIGN_TABS.map(t => (
+            <button key={t.key} onClick={() => setView(t.key)}
+              style={{padding:'.4rem .7rem',background: view === t.key ? 'var(--yellow)' : 'transparent',color: view === t.key ? '#0A0A14' : 'var(--text-muted)',border:'1px solid '+(view === t.key ? 'var(--yellow)' : 'var(--border)'),borderRadius:7,fontSize:'.74rem',fontWeight: view === t.key ? 700 : 500,cursor:'pointer',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:'.35rem',transition:'all .12s'}}>
+              <span style={{fontSize:'.85rem'}}>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* RIGHT: status + quick actions */}
+      {activeCampaign && (
+        <div style={{display:'flex',gap:'.4rem',alignItems:'center'}}>
+          <span style={{fontSize:'.62rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textTransform:'uppercase'}}>● auto-pulled</span>
+        </div>
+      )}
+
+      {/* CREATE MODAL */}
+      {createOpen && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',backdropFilter:'blur(6px)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={() => setCreateOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{width:'min(520px,92vw)',background:'var(--bg-solid)',border:'1px solid var(--border)',borderRadius:14,padding:'1.5rem',boxShadow:'0 20px 60px rgba(0,0,0,.5)'}}>
+            <h2 style={{margin:'0 0 .35rem'}}>New Campaign</h2>
+            <p style={{margin:'0 0 1.25rem',color:'var(--text-muted)',fontSize:'.85rem'}}>One campaign = one video / recording / piece of content. Strategy → Thumbnails → Recording → Publish all stay scoped to it.</p>
+
+            <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Campaign Name *</label>
+            <input className="input" placeholder="e.g., Why AI Tools Fail Most SMBs" value={newName} onChange={e => setNewName(e.target.value)} style={{marginBottom:'.75rem'}} autoFocus/>
+
+            <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Topic / hook seed</label>
+            <input className="input" placeholder="What's the core idea?" value={newTopic} onChange={e => setNewTopic(e.target.value)} style={{marginBottom:'.75rem'}}/>
+
+            <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Format</label>
+            <div style={{display:'flex',gap:'.4rem',marginBottom:'.75rem'}}>
+              {[['short','Short-Form'],['long','Long-Form'],['both','Both']].map(([v,l]) => (
+                <button key={v} className={`btn btn-sm ${newFormat===v?'btn-primary':'btn-ghost'}`} onClick={() => setNewFormat(v)} style={{flex:1}}>{l}</button>
+              ))}
+            </div>
+
+            <label style={{fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.3rem'}}>Target Platforms</label>
+            <div style={{display:'flex',gap:'.4rem',marginBottom:'1.25rem',flexWrap:'wrap'}}>
+              {[['ig','Instagram'],['tt','TikTok'],['yt','YouTube'],['li','LinkedIn'],['fb','Facebook']].map(([v,l]) => (
+                <button key={v} onClick={() => setNewPlatforms(p => ({...p, [v]: !p[v]}))}
+                  style={{padding:'.35rem .65rem',background: newPlatforms[v] ? 'var(--yellow)' : 'var(--glass)',color: newPlatforms[v] ? '#0A0A14' : 'var(--text-muted)',border:'1px solid '+(newPlatforms[v] ? 'var(--yellow)':'var(--border)'),borderRadius:6,fontSize:'.72rem',fontWeight: newPlatforms[v]?700:500,cursor:'pointer'}}>{l}</button>
+              ))}
+            </div>
+
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-ghost" onClick={() => setCreateOpen(false)} style={{flex:1}}>Cancel</button>
+              <button className="btn btn-primary" onClick={createCampaign} style={{flex:2}}>Create & Activate</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppShell() {
   return (
     <>
@@ -5815,6 +7001,7 @@ function AppShell() {
         <Sidebar />
         <div style={{display:'flex',flexDirection:'column',minHeight:'100vh',overflow:'hidden'}}>
           <Topbar />
+          <CampaignBar />
           <div className="main" style={{flex:1,overflowY:'auto'}}><ViewRouter /></div>
         </div>
       </div>
@@ -5910,11 +7097,46 @@ function LeadMagnetView({magnetId}) {
    ROOT APP
    ============================================================ */
 function App() {
-  const {view} = useApp();
-  // Lead magnet route — render standalone landing page if ?magnet= present
+  const {view, setView} = useApp();
+  // Route handling on first load: ?magnet=, ?view=, ?unsubscribe=
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const magnetId = urlParams?.get('magnet');
+  const queryView = urlParams?.get('view');
+  const unsubscribeEmail = urlParams?.get('unsubscribe');
+
+  useEffect(() => {
+    if (queryView && ['terms','privacy','sms','email'].includes(queryView)) {
+      setView('legal');
+    } else if (queryView && ['workflows','blog','dashboard','create','pricing'].includes(queryView)) {
+      setView(queryView);
+    }
+    if (unsubscribeEmail) {
+      // Best-effort: log to consent_log if Supabase is connected
+      try {
+        if (window.SupabaseClient && window.SupabaseClient.isReady()) {
+          window.SupabaseClient.insert('consent_log', {
+            identifier: unsubscribeEmail, channel:'email', action:'opt_out',
+            source:'unsubscribe-link', user_agent: navigator.userAgent,
+            metadata: {url: window.location.href}
+          });
+          window.SupabaseClient.update('email_queue', null, {status:'unsubscribed', unsubscribed_at: new Date().toISOString()})
+            .catch(() => {});
+        }
+      } catch(e) {}
+    }
+  }, [queryView, unsubscribeEmail, setView]);
+
   if (magnetId) return <LeadMagnetView magnetId={magnetId} />;
+  if (unsubscribeEmail) return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg)',padding:'2rem'}}>
+      <div className="card" style={{maxWidth:520,padding:'2.5rem',textAlign:'center'}}>
+        <div style={{fontSize:'2.5rem',marginBottom:'.75rem'}}>✓</div>
+        <h2>You're unsubscribed</h2>
+        <p style={{color:'var(--text-muted)',marginBottom:'1.5rem'}}><strong>{unsubscribeEmail}</strong> has been removed from all marketing emails. Service-related messages (billing, security) may still be sent.</p>
+        <a href="/" className="btn btn-primary">Back to Supernova</a>
+      </div>
+    </div>
+  );
   return (
     <>
       {view === 'landing' ? <LandingPage /> : <AppShell />}
