@@ -1,0 +1,33 @@
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate HTML
+        run: |
+          if [ ! -f empire-os.html ]; then echo "Missing empire-os.html"; exit 1; fi
+          echo "✓ empire-os.html exists ($(wc -l < empire-os.html) lines)"
+
+      - name: Validate Vercel Config
+        run: |
+          if [ ! -f vercel.json ]; then echo "Missing vercel.json"; exit 1; fi
+          python3 -c "import json; json.load(open('vercel.json'))" || (echo "Invalid vercel.json"; exit 1)
+          echo "✓ vercel.json valid"
+
+      - name: Deploy to Vercel
+        if: github.ref == 'refs/heads/main'
+        run: |
+          npm install -g vercel
+          vercel --token=${{ secrets.VERCEL_TOKEN }} --prod --yes
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

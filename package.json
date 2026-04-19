@@ -1,0 +1,25 @@
+{
+  "name": "supernova-editor",
+  "version": "1.0.0",
+  "description": "SUPERNOVA EDITOR — Content Creation Operating System. One topic. Six formats. Five platforms. Zero guesswork.",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m http.server 8000",
+    "start": "python3 -m http.server 8000",
+    "deploy": "vercel --prod"
+  },
+  "keywords": [
+    "content-creation",
+    "social-media",
+    "ai",
+    "video-editor",
+    "supernova"
+  ],
+  "author": "Lamin S. Ngobeh <mr.ngobeh@gmail.com>",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/laminsn/supernova-editor",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/laminsn/supernova-editor.git"
+  }
+}

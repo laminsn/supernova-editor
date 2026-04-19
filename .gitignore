@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+.env.production
+.vercel
+.DS_Store
+*.log
+.cache/
+dist/
+build/
+.playwright-mcp/
+*.png
+!supernova-*.png
