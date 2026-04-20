@@ -84,8 +84,8 @@ CREATE TABLE IF NOT EXISTS content (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_content_workspace ON content(workspace_id);
-CREATE INDEX idx_content_status ON content(status);
+CREATE INDEX IF NOT EXISTS idx_content_workspace ON content(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_content_status ON content(status);
 
 -- ============================================================
 -- COLLABORATORS (external creators)
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS collaborators (
   last_active TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_collaborators_workspace ON collaborators(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_collaborators_workspace ON collaborators(workspace_id);
 
 -- ============================================================
 -- CAMPAIGNS
@@ -161,8 +161,8 @@ CREATE TABLE IF NOT EXISTS activity_log (
   metadata JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_activity_workspace ON activity_log(workspace_id);
-CREATE INDEX idx_activity_created ON activity_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_workspace ON activity_log(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC);
 
 -- ============================================================
 -- ROW LEVEL SECURITY (RLS)
@@ -176,37 +176,50 @@ ALTER TABLE packages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
 
 -- Profiles: users can read/update their own profile
+DROP POLICY IF EXISTS "Users see own profile" ON profiles;
 CREATE POLICY "Users see own profile" ON profiles FOR SELECT USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Users update own profile" ON profiles;
 CREATE POLICY "Users update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 
 -- Workspace members can see workspace data
+DROP POLICY IF EXISTS "Members see workspace" ON workspaces;
 CREATE POLICY "Members see workspace" ON workspaces FOR SELECT
   USING (id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
 
 -- Content: workspace members can read; editors+ can write
+DROP POLICY IF EXISTS "Members read content" ON content;
 CREATE POLICY "Members read content" ON content FOR SELECT
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
+DROP POLICY IF EXISTS "Editors write content" ON content;
 CREATE POLICY "Editors write content" ON content FOR ALL
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid() AND role IN ('owner','admin','editor','contributor')));
 
 -- Same pattern for other tables
+DROP POLICY IF EXISTS "Members read collaborators" ON collaborators;
 CREATE POLICY "Members read collaborators" ON collaborators FOR SELECT
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
+DROP POLICY IF EXISTS "Editors manage collaborators" ON collaborators;
 CREATE POLICY "Editors manage collaborators" ON collaborators FOR ALL
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid() AND role IN ('owner','admin','editor')));
 
+DROP POLICY IF EXISTS "Members read campaigns" ON campaigns;
 CREATE POLICY "Members read campaigns" ON campaigns FOR SELECT
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
+DROP POLICY IF EXISTS "Editors manage campaigns" ON campaigns;
 CREATE POLICY "Editors manage campaigns" ON campaigns FOR ALL
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid() AND role IN ('owner','admin','editor')));
 
+DROP POLICY IF EXISTS "Members read packages" ON packages;
 CREATE POLICY "Members read packages" ON packages FOR SELECT
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
+DROP POLICY IF EXISTS "Editors manage packages" ON packages;
 CREATE POLICY "Editors manage packages" ON packages FOR ALL
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid() AND role IN ('owner','admin','editor')));
 
+DROP POLICY IF EXISTS "Members read activity" ON activity_log;
 CREATE POLICY "Members read activity" ON activity_log FOR SELECT
   USING (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
+DROP POLICY IF EXISTS "Members log activity" ON activity_log;
 CREATE POLICY "Members log activity" ON activity_log FOR INSERT
   WITH CHECK (workspace_id IN (SELECT workspace_id FROM profiles WHERE id = auth.uid()));
 

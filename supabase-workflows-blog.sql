@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 CREATE INDEX IF NOT EXISTS campaigns_workspace_idx ON campaigns(workspace_id, updated_at DESC);
 
 -- Add campaign_id to existing content table so any piece can be tagged to a campaign.

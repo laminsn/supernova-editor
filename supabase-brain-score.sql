@@ -34,9 +34,9 @@ CREATE TABLE IF NOT EXISTS brain_predictions (
   model_version TEXT DEFAULT 'v0-heuristic',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_brain_pred_workspace ON brain_predictions(workspace_id);
-CREATE INDEX idx_brain_pred_content ON brain_predictions(content_id);
-CREATE INDEX idx_brain_pred_score ON brain_predictions(overall_score DESC);
+CREATE INDEX IF NOT EXISTS idx_brain_pred_workspace ON brain_predictions(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_brain_pred_content ON brain_predictions(content_id);
+CREATE INDEX IF NOT EXISTS idx_brain_pred_score ON brain_predictions(overall_score DESC);
 
 -- ============================================================
 -- ENGAGEMENT DATA — actual outcomes to train on
@@ -71,10 +71,10 @@ CREATE TABLE IF NOT EXISTS engagement_data (
   measured_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_engagement_workspace ON engagement_data(workspace_id);
-CREATE INDEX idx_engagement_content ON engagement_data(content_id);
-CREATE INDEX idx_engagement_prediction ON engagement_data(prediction_id);
-CREATE INDEX idx_engagement_viral ON engagement_data(is_viral) WHERE is_viral = TRUE;
+CREATE INDEX IF NOT EXISTS idx_engagement_workspace ON engagement_data(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_content ON engagement_data(content_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_prediction ON engagement_data(prediction_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_viral ON engagement_data(is_viral) WHERE is_viral = TRUE;
 
 -- ============================================================
 -- TRAINING PAIRS VIEW — for future ML model retraining
@@ -111,7 +111,11 @@ WHERE e.id IS NOT NULL;
 ALTER TABLE brain_predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE engagement_data ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public read brain_predictions" ON brain_predictions;
 CREATE POLICY "Public read brain_predictions" ON brain_predictions FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public write brain_predictions" ON brain_predictions;
 CREATE POLICY "Public write brain_predictions" ON brain_predictions FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public read engagement_data" ON engagement_data;
 CREATE POLICY "Public read engagement_data" ON engagement_data FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public write engagement_data" ON engagement_data;
 CREATE POLICY "Public write engagement_data" ON engagement_data FOR ALL USING (true) WITH CHECK (true);

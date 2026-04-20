@@ -3,6 +3,12 @@
 -- Run in Supabase SQL Editor.
 -- ============================================================
 
+-- Helper used by the storage policies. Permissive while strict-RLS isn't on
+-- yet; supabase-rls-strict.sql replaces this with the real workspace check.
+CREATE OR REPLACE FUNCTION current_user_in_workspace(ws uuid) RETURNS boolean AS $$
+  SELECT true;
+$$ LANGUAGE sql STABLE;
+
 -- 1. Buckets
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES
