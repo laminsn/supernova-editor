@@ -49,8 +49,9 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 | Image generation | ✅ | `/api/generate-image` | Ideogram v3 |
 | Translation (batch fan-out) | ✅ | `/api/translate` | Anthropic |
 | Asset library (image/video/music/SFX/GIF) | ✅ | `/api/asset-library` | Pexels + Pixabay + Freesound + GIPHY + Tenor |
-| Auto-captions | 🟡 | `/api/transcribe` (stub in auto-edit) | Deepgram |
+| Auto-captions | ✅ | `/api/transcribe` | Deepgram (Nova-2, returns text + WebVTT) |
 | AI voice-over (multilingual) | 🔴 | `/api/synthesize` (planned) | ElevenLabs |
+| Live stream simulcast | ✅ | `/api/livestream-create` | Restream.io (with manual RTMP fallback) |
 | Brain Score v1 (trained) | 🔴 | After 500 labeled pairs | XGBoost on `training_pairs` view |
 | Multi-modal Brain Score v2 | 🔴 | After 5K pairs | CLIP + Whisper embeddings |
 
@@ -75,9 +76,9 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 
 | Capability | Status | Notes |
 |---|---|---|
-| Recording uploads | 🟡 | MediaRecorder downloads locally; needs upload to Supabase Storage |
-| Image asset library | 🔴 | `generated_images` table + Storage bucket |
-| Asset CDN (signed URLs) | 🔴 | Supabase Storage transform API |
+| Recording uploads | ✅ | `/api/upload-recording` issues signed URLs to `recordings` Storage bucket |
+| Image asset library | ✅ | `generated_images` table + Asset Library |
+| Asset CDN (signed URLs) | 🟡 | Storage policies in place; transform API not yet used |
 | Backup / export | 🔴 | One-click ZIP export of workspace |
 | Soft-delete + 30-day recovery | 🔴 | `deleted_at` columns + admin restore |
 

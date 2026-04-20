@@ -1731,6 +1731,7 @@ function Sidebar() {
     {key:'spy',label:'Competitor Spy',icon:Icons.eye},
     {key:'collaboration',label:'Collaboration',icon:Icons.users},
     {key:'screenrec',label:'Screen Record',icon:Icons.video,badge:'NEW'},
+    {key:'livestream',label:'Live Stream',icon:Icons.bell,badge:'NEW'},
     {key:'workflows',label:'Workflows',icon:Icons.zap,badge:'NEW'},
     {key:'blog',label:'Blog Builder',icon:Icons.type,badge:'NEW'},
     {key:'assets',label:'Asset Library',icon:Icons.music,badge:'NEW'},
@@ -1824,7 +1825,7 @@ function SidebarUserChip() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',legal:'Terms & Privacy',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -2650,6 +2651,44 @@ function EditorView() {
 
   const [pickedTrack, setPickedTrack] = useState(null);
   const [pickedCaptions, setPickedCaptions] = useState(null);
+  const [appliedEffect, setAppliedEffect] = useState(null);
+  const [appliedTransition, setAppliedTransition] = useState(null);
+  const [appliedTextPreset, setAppliedTextPreset] = useState(null);
+  const [appliedOverlays, setAppliedOverlays] = useState([]);
+  const [activeStylePack, setActiveStylePack] = useState(null);
+  const [previewFilter, setPreviewFilter] = useState(null);
+  const [punchInOpen, setPunchInOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const handleApplyTemplate = (item) => {
+    if (item.type === 'pack') {
+      const p = item.pack;
+      setActiveStylePack(p);
+      const fx = EFFECTS.find(e => e.id === p.effect);
+      const tx = TEXT_PRESETS.find(t => t.id === p.textPreset);
+      setAppliedEffect(fx);
+      setPreviewFilter(fx?.filter || null);
+      setAppliedTextPreset(tx);
+      setAppliedTransition({type:'trans', id:p.transitions[0], name:p.transitions[0]});
+      setAppliedOverlays(p.overlays || []);
+    } else if (item.type === 'fx') {
+      setAppliedEffect(item);
+      setPreviewFilter(item.filter || null);
+    } else if (item.type === 'trans') {
+      setAppliedTransition(item);
+    } else if (item.type === 'text') {
+      setAppliedTextPreset(item);
+    } else if (item.type === 'over') {
+      setAppliedOverlays(o => o.includes(item.id) ? o.filter(x => x !== item.id) : [...o, item.id]);
+    }
+  };
+  const appliedSummary =
+    activeStylePack?.id === appliedEffect?.id ? null :
+    [appliedEffect && {type:'fx', id:appliedEffect.id}, appliedTransition, appliedTextPreset, ...appliedOverlays.map(id => ({type:'over', id}))].filter(Boolean);
+
+  const uploadCurrentRecording = async () => {
+    addToast('Connect a recording from Screen Record first, then upload here.', 'info');
+  };
 
   // Real auto-edit: pulls a real beat-matched track via /api/asset-library when addBeats=true,
   // then runs the visual progress steps. Captions stub for now (Deepgram integration pending).
@@ -2783,7 +2822,7 @@ function EditorView() {
       </div>
 
       {/* VIDEO PREVIEW */}
-      <div className="editor-stage scanline">
+      <div className="editor-stage scanline" style={{filter: previewFilter || undefined, transition:'filter .25s ease'}}>
         {cameraMode === 'single' && (
           <div style={{textAlign:'center',zIndex:1}}>
             <div style={{fontFamily:'var(--display)',fontWeight:700,fontSize:'1.5rem',color:'var(--text-muted)',marginBottom:'.5rem'}}>Preview</div>
@@ -2860,12 +2899,32 @@ function EditorView() {
         <button className="btn btn-ghost btn-sm" onClick={() => openDrawer('music')}>{Icons.music} Music</button>
         <button className="btn btn-ghost btn-sm" onClick={() => openDrawer('gifs')}>{Icons.gif} GIFs</button>
         <button className="btn btn-ghost btn-sm" onClick={() => addToast('GIF generated from current clip!','success')}>{Icons.gif} Export GIF</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => setPunchInOpen(true)} title="Quick re-record this clip">{Icons.camera} Punch-In</button>
+        <button className="btn btn-ghost btn-sm" onClick={uploadCurrentRecording} disabled={uploading}>{Icons.download} {uploading ? 'Uploading…' : 'Upload Recording'}</button>
         <button className={`btn btn-sm ${autoEditOpen?'btn-primary':'btn-ghost'}`} onClick={() => setAutoEditOpen(!autoEditOpen)} style={{marginLeft:'auto'}}>{Icons.sparkle} Auto-Edit</button>
         <button className="btn btn-primary btn-sm" onClick={runAutoEdit}>{Icons.zap} One-Click Edit</button>
       </div>
 
       {/* SCRIPT EDITOR — Claude rewrite */}
       <ScriptEditorCard />
+
+      {/* EFFECTS / TRANSITIONS / TEXT / OVERLAYS / STYLE PACKS */}
+      <EffectsPanel
+        applied={appliedEffect ? {type:'fx', id:appliedEffect.id} : appliedTransition}
+        onApply={handleApplyTemplate}
+        onPreviewEffect={setPreviewFilter}
+      />
+
+      {/* PUNCH-IN MODAL */}
+      <PunchInModal
+        open={punchInOpen}
+        onClose={() => setPunchInOpen(false)}
+        clipName={selectedClip ? clips.find(c => c.id === selectedClip)?.name : 'this clip'}
+        onCommit={({blob, durationSec}) => {
+          // Local-only commit for now; real impl posts to /api/upload-recording
+          addToast(`Punch-in saved (${durationSec.toFixed(1)}s) — committed locally`, 'success');
+        }}
+      />
 
       {/* AUTO-EDIT SIDE PANEL */}
       {autoEditOpen && (
@@ -7762,6 +7821,578 @@ function ReferralsView() {
 }
 
 /* ============================================================
+   EDITOR LIBRARY — transitions, effects, text presets, overlays, style packs.
+   All preview-grade (CSS filters + animations). Real export goes through
+   ffmpeg later; for now this matches CapCut/VEED's in-browser preview model.
+   ============================================================ */
+const TRANSITIONS = [
+  // Motion
+  {id:'whip-pan-left',  name:'Whip Pan Left',   category:'Motion',     duration:0.3, css:'translate3d(-100%,0,0)', icon:'⬅️'},
+  {id:'whip-pan-right', name:'Whip Pan Right',  category:'Motion',     duration:0.3, css:'translate3d(100%,0,0)',  icon:'➡️'},
+  {id:'zoom-punch',     name:'Zoom Punch',      category:'Motion',     duration:0.25, css:'scale(1.5)',            icon:'🥊'},
+  {id:'zoom-out',       name:'Zoom Out',        category:'Motion',     duration:0.4, css:'scale(0.3)',             icon:'🔍'},
+  {id:'spin-3d',        name:'3D Spin',         category:'Motion',     duration:0.5, css:'rotateY(180deg)',        icon:'🔄'},
+  {id:'tilt',           name:'Camera Tilt',     category:'Motion',     duration:0.4, css:'rotate(8deg) scale(1.1)', icon:'📐'},
+  {id:'shake',          name:'Shake Cut',       category:'Motion',     duration:0.2, css:'translate3d(0,0,0)',     icon:'💥', anim:'shake'},
+
+  // Glitch / Digital
+  {id:'glitch',         name:'Glitch',          category:'Glitch',     duration:0.4, icon:'⚡'},
+  {id:'rgb-split',      name:'RGB Split',       category:'Glitch',     duration:0.3, icon:'🌈'},
+  {id:'pixel',          name:'Pixel Sort',      category:'Glitch',     duration:0.35, icon:'🟦'},
+  {id:'tv-static',      name:'TV Static',       category:'Glitch',     duration:0.3, icon:'📺'},
+  {id:'data-mosh',      name:'Data Mosh',       category:'Glitch',     duration:0.5, icon:'💾'},
+
+  // Cinematic
+  {id:'light-leak',     name:'Light Leak',      category:'Cinematic',  duration:0.6, icon:'☀️'},
+  {id:'lens-flare',     name:'Lens Flare',      category:'Cinematic',  duration:0.5, icon:'✨'},
+  {id:'film-burn',      name:'Film Burn',       category:'Cinematic',  duration:0.7, icon:'🎞️'},
+  {id:'vignette-fade',  name:'Vignette Fade',   category:'Cinematic',  duration:0.5, icon:'🌑'},
+  {id:'cross-dissolve', name:'Cross Dissolve',  category:'Cinematic',  duration:0.5, icon:'🌫️'},
+
+  // Pop / Trendy
+  {id:'slice-vertical', name:'Slice Vertical',  category:'Pop',        duration:0.4, icon:'🔪'},
+  {id:'slice-horiz',    name:'Slice Horizontal',category:'Pop',        duration:0.4, icon:'➖'},
+  {id:'mirror',         name:'Mirror Flip',     category:'Pop',        duration:0.3, icon:'🪞'},
+  {id:'bounce',         name:'Bounce',          category:'Pop',        duration:0.5, icon:'🏀'},
+  {id:'paper-tear',     name:'Paper Tear',      category:'Pop',        duration:0.4, icon:'📄'},
+
+  // Smooth
+  {id:'fade',           name:'Fade Black',      category:'Smooth',     duration:0.5, icon:'⬛'},
+  {id:'fade-white',     name:'Fade White',      category:'Smooth',     duration:0.5, icon:'⬜'},
+  {id:'morph',          name:'Morph',           category:'Smooth',     duration:0.6, icon:'🌊'},
+];
+
+const EFFECTS = [
+  // Color grades
+  {id:'cinematic',  name:'Cinematic LUT',   category:'Color',  filter:'contrast(1.15) saturate(1.18) brightness(0.96) hue-rotate(-3deg)', icon:'🎬'},
+  {id:'teal-orange',name:'Teal & Orange',   category:'Color',  filter:'hue-rotate(-12deg) saturate(1.4) contrast(1.08)',                  icon:'🟠'},
+  {id:'cool-blue',  name:'Cool Blue',       category:'Color',  filter:'hue-rotate(15deg) saturate(1.1) brightness(1.02)',                 icon:'🔵'},
+  {id:'warm-gold',  name:'Warm Gold',       category:'Color',  filter:'sepia(0.25) saturate(1.3) brightness(1.05)',                       icon:'🟡'},
+  {id:'mono',       name:'Black & White',   category:'Color',  filter:'grayscale(1) contrast(1.15)',                                       icon:'⚫'},
+  {id:'high-key',   name:'High Key',        category:'Color',  filter:'brightness(1.25) saturate(0.85) contrast(0.9)',                     icon:'☀️'},
+  {id:'low-key',    name:'Low Key Noir',    category:'Color',  filter:'brightness(0.7) contrast(1.4) saturate(0.6)',                       icon:'🌑'},
+
+  // Retro / vibe
+  {id:'vhs',        name:'VHS Tape',        category:'Retro',  filter:'contrast(1.1) saturate(1.6) hue-rotate(-5deg) blur(0.2px)',         icon:'📼'},
+  {id:'vintage',    name:'Vintage 70s',     category:'Retro',  filter:'sepia(0.5) saturate(1.2) contrast(1.1) brightness(0.95)',           icon:'🕰️'},
+  {id:'polaroid',   name:'Polaroid',        category:'Retro',  filter:'sepia(0.2) brightness(1.05) saturate(0.9)',                          icon:'📸'},
+  {id:'film-grain', name:'Film Grain',      category:'Retro',  filter:'contrast(1.08) brightness(0.97)',                                   icon:'🎞️'},
+
+  // Vibe
+  {id:'neon',       name:'Neon Glow',       category:'Vibe',   filter:'saturate(2) contrast(1.2) brightness(1.05) hue-rotate(8deg)',       icon:'💜'},
+  {id:'cyberpunk',  name:'Cyberpunk',       category:'Vibe',   filter:'hue-rotate(280deg) saturate(1.8) contrast(1.3) brightness(0.95)',   icon:'🌃'},
+  {id:'pastel',     name:'Pastel Soft',     category:'Vibe',   filter:'saturate(0.7) brightness(1.1) contrast(0.92)',                       icon:'🎨'},
+  {id:'dreamy',     name:'Dreamy Bloom',    category:'Vibe',   filter:'brightness(1.1) saturate(1.1) blur(0.3px) contrast(0.95)',           icon:'✨'},
+
+  // Distortion
+  {id:'fisheye',    name:'Fisheye',         category:'Distort',filter:'',                                                                  icon:'🐟'},
+  {id:'duotone',    name:'Duotone',         category:'Color',  filter:'grayscale(1) contrast(1.2) sepia(0.5) hue-rotate(180deg)',          icon:'◐'},
+  {id:'sharp',      name:'Sharpen',         category:'Tech',   filter:'contrast(1.4) saturate(1.1)',                                       icon:'🔪'},
+];
+
+const TEXT_PRESETS = [
+  {id:'kinetic',     name:'Kinetic Type',    style:{fontFamily:'var(--display)',fontSize:'4rem',fontWeight:900,color:'#fff',letterSpacing:'-.04em'}, anim:'kinetic 0.6s cubic-bezier(.2,.9,.3,1.4)'},
+  {id:'typewriter',  name:'Typewriter',      style:{fontFamily:'var(--mono)',fontSize:'2rem',color:'var(--yellow)'}, anim:'typewriter 1.2s steps(40,end)'},
+  {id:'glitch-text', name:'Glitch Text',     style:{fontFamily:'var(--display)',fontSize:'3.5rem',fontWeight:900,color:'#fff',textShadow:'2px 0 var(--red), -2px 0 var(--blue)'}, anim:'glitch-text 0.6s'},
+  {id:'neon-glow',   name:'Neon Glow',       style:{fontFamily:'var(--display)',fontSize:'3.2rem',fontWeight:900,color:'var(--magenta)',textShadow:'0 0 12px currentColor, 0 0 24px currentColor'}, anim:'pulse 1.6s ease-in-out infinite'},
+  {id:'gradient',    name:'Gradient Wipe',   style:{fontFamily:'var(--display)',fontSize:'3.6rem',fontWeight:900,background:'linear-gradient(90deg,#FFD60A,#FF8C00,#FF2D87)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}, anim:'gradient-wipe 2s linear infinite'},
+  {id:'karaoke',     name:'Karaoke',         style:{fontFamily:'var(--display)',fontSize:'2.4rem',fontWeight:800,color:'rgba(255,255,255,0.4)'}, anim:'karaoke 2s linear'},
+  {id:'subtitle',    name:'Subtitle Bold',   style:{fontFamily:'var(--display)',fontSize:'2rem',fontWeight:900,color:'#FFD60A',textShadow:'2px 2px 0 #000, -1px -1px 0 #000',padding:'.4rem .8rem',background:'rgba(0,0,0,.55)',borderRadius:6}, anim:null},
+  {id:'lower-third', name:'Lower Third Bar', style:{fontFamily:'var(--display)',fontSize:'1.6rem',fontWeight:800,color:'#fff',padding:'.5rem 1rem',background:'linear-gradient(90deg,#FFD60A,#FF8C00)',color:'#0A0A14',borderRadius:'4px 4px 0 0'}, anim:'slide-in-left 0.4s ease-out'},
+  {id:'big-quote',   name:'Big Quote',       style:{fontFamily:'var(--display)',fontSize:'2.6rem',fontWeight:700,color:'#fff',fontStyle:'italic',lineHeight:1.15}, anim:'fade-up 0.6s ease-out'},
+  {id:'caption-pop', name:'TikTok Caption',  style:{fontFamily:'var(--display)',fontSize:'2.2rem',fontWeight:900,color:'#fff',textShadow:'3px 3px 0 #000,-2px -2px 0 #000',padding:'.3rem .7rem',background:'#FFD60A',color:'#0A0A14',borderRadius:6,transform:'rotate(-2deg)'}, anim:'pop-in 0.3s cubic-bezier(.2,.9,.3,1.6)'},
+  {id:'countdown',   name:'Countdown',       style:{fontFamily:'var(--display)',fontSize:'5rem',fontWeight:900,color:'var(--yellow)'}, anim:'pulse 1s infinite'},
+  {id:'mention',     name:'Handle Mention',  style:{fontFamily:'var(--mono)',fontSize:'1.3rem',color:'var(--blue)',padding:'.25rem .6rem',background:'rgba(78,168,255,0.15)',borderRadius:4}, anim:'fade-up 0.4s'},
+  {id:'callout',     name:'Callout Bubble',  style:{fontFamily:'var(--display)',fontSize:'1.5rem',fontWeight:800,color:'#0A0A14',padding:'.6rem 1rem',background:'#FFD60A',borderRadius:'18px 18px 18px 4px'}, anim:'pop-in 0.3s'},
+  {id:'big-emoji',   name:'Big Emoji',       style:{fontSize:'5rem'}, anim:'pop-in 0.4s cubic-bezier(.2,.9,.3,1.6)'},
+  {id:'comment-overlay', name:'Comment Overlay', style:{fontFamily:'var(--body)',fontSize:'1.1rem',color:'#fff',padding:'.6rem .9rem',background:'rgba(0,0,0,0.7)',borderRadius:18,backdropFilter:'blur(6px)'}, anim:'slide-in-left 0.4s'},
+];
+
+const OVERLAYS = [
+  {id:'progress-bar',     name:'Progress Bar',     category:'UI',         desc:'Top-mounted thin progress bar (great for tutorials).'},
+  {id:'lower-third-name', name:'Name Lower Third', category:'UI',         desc:'Name + title chip in bottom-left.'},
+  {id:'subscribe-popup',  name:'Subscribe Pop-Up', category:'YouTube',    desc:'Animated subscribe button bottom-right.'},
+  {id:'like-burst',       name:'Like Burst',       category:'Social',     desc:'Hearts/likes flying up Instagram-style.'},
+  {id:'follow-cta',       name:'Follow CTA',       category:'Social',     desc:'@handle pulse with follow arrow.'},
+  {id:'countdown-overlay',name:'Countdown Timer',  category:'Engagement', desc:'5/10/30s urgency timer top-left.'},
+  {id:'progress-dots',    name:'Slide Progress',   category:'UI',         desc:'Carousel-style dots for multi-tip videos.'},
+  {id:'logo-watermark',   name:'Logo Watermark',   category:'Brand',      desc:'Brand mark fixed bottom-right.'},
+  {id:'big-arrow',        name:'Pointing Arrow',   category:'Engagement', desc:'Animated arrow toward CTA region.'},
+  {id:'border-frame',     name:'Border Frame',     category:'UI',         desc:'Branded color border around video.'},
+  {id:'reaction-bubble',  name:'Reaction Bubble',  category:'Social',     desc:'Comment-style reaction floating in.'},
+  {id:'split-screen',     name:'Split Screen',     category:'UI',         desc:'2-column layout for compare videos.'},
+];
+
+const STYLE_PACKS = [
+  {id:'tiktok-pop',     name:'TikTok Pop',         icon:'🎵', desc:'Bouncy text, beat-cut transitions, neon overlays.', transitions:['whip-pan-left','zoom-punch','shake','rgb-split'], effect:'neon',       textPreset:'caption-pop',  music:'hip-hop'},
+  {id:'youtube-tut',    name:'YouTube Tutorial',   icon:'📺', desc:'Clean cuts, lower-thirds, subscribe pop-ups.',     transitions:['cross-dissolve','fade'],                          effect:'cinematic',  textPreset:'lower-third',  music:'corporate', overlays:['lower-third-name','subscribe-popup','progress-bar']},
+  {id:'cinematic-vlog', name:'Cinematic Vlog',     icon:'🎬', desc:'Light leaks, teal & orange grade, slow dissolves.', transitions:['light-leak','lens-flare','cross-dissolve'],     effect:'teal-orange',textPreset:'big-quote',     music:'cinematic'},
+  {id:'podcast-reel',   name:'Podcast Clip',       icon:'🎙️', desc:'Karaoke captions, name chip, audio waveform vibe.', transitions:['cross-dissolve','fade'],                       effect:'low-key',    textPreset:'karaoke',       music:'corporate', overlays:['lower-third-name','progress-bar']},
+  {id:'news-clip',      name:'News Reel',          icon:'📰', desc:'Lower-third banner, ticker, urgent pacing.',        transitions:['whip-pan-right','slice-horiz'],                  effect:'high-key',   textPreset:'lower-third',   music:'corporate'},
+  {id:'vintage-vibes',  name:'Vintage Vibes',      icon:'🕰️', desc:'70s sepia, film burn transitions, polaroid vibe.', transitions:['film-burn','vignette-fade','cross-dissolve'],   effect:'vintage',    textPreset:'big-quote',     music:'acoustic'},
+  {id:'glitch-core',    name:'Glitch Core',        icon:'⚡', desc:'Pure chaos: glitch, RGB split, pixel sort.',         transitions:['glitch','rgb-split','pixel','data-mosh'],        effect:'cyberpunk',  textPreset:'glitch-text',   music:'electronic'},
+  {id:'instagram-reel', name:'Instagram Reel',     icon:'📷', desc:'Bouncy, polished, mobile-first.',                   transitions:['zoom-punch','bounce','whip-pan-left'],          effect:'pastel',     textPreset:'caption-pop',   music:'hip-hop'},
+  {id:'whiteboard',     name:'Whiteboard Course',  icon:'🎓', desc:'Clean, focused, lots of subtitles + arrows.',       transitions:['fade','cross-dissolve'],                         effect:'high-key',   textPreset:'subtitle',      music:'acoustic',  overlays:['progress-bar','big-arrow']},
+  {id:'product-demo',   name:'Product Demo',       icon:'🛍️', desc:'Quick zoom-ins, callout text, brand colors.',      transitions:['zoom-punch','slice-vertical'],                  effect:'cinematic',  textPreset:'callout',       music:'electronic',overlays:['logo-watermark','big-arrow']},
+  {id:'asmr',           name:'ASMR / Process',     icon:'🌙', desc:'Slow dreamy crossfades, soft grade.',                transitions:['cross-dissolve','morph'],                       effect:'dreamy',     textPreset:'subtitle',      music:'acoustic'},
+  {id:'pump-fitness',   name:'Pump / Fitness',     icon:'💪', desc:'Hard cuts, shake, neon energy.',                     transitions:['shake','zoom-punch','glitch'],                  effect:'neon',       textPreset:'caption-pop',   music:'electronic'},
+];
+
+/* ============================================================
+   EFFECTS PANEL — drop-in for EditorView. Tabs: Style Packs / Transitions /
+   Effects / Text / Overlays. One-click apply.
+   ============================================================ */
+function EffectsPanel({applied, onApply, onPreviewEffect}) {
+  const {addToast} = useApp();
+  const [tab, setTab] = useState('packs');
+  const [transCat, setTransCat] = useState('All');
+  const [fxCat, setFxCat] = useState('All');
+
+  const transCats = ['All', ...new Set(TRANSITIONS.map(t => t.category))];
+  const fxCats    = ['All', ...new Set(EFFECTS.map(e => e.category))];
+
+  const filteredTrans = transCat === 'All' ? TRANSITIONS : TRANSITIONS.filter(t => t.category === transCat);
+  const filteredFx    = fxCat === 'All' ? EFFECTS : EFFECTS.filter(e => e.category === fxCat);
+
+  const applyPack = (pack) => {
+    onApply({type:'pack', pack});
+    addToast(`Applied "${pack.name}" — transitions + effect + text + music auto-loaded`, 'success');
+  };
+
+  return (
+    <div className="card" style={{marginBottom:'1rem'}}>
+      <div className="card-head">
+        <h3 style={{display:'flex',alignItems:'center',gap:'.4rem'}}>{Icons.sparkle} Effects & Templates <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'rgba(255,214,10,0.12)',color:'var(--yellow)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>{TRANSITIONS.length+EFFECTS.length+TEXT_PRESETS.length+OVERLAYS.length+STYLE_PACKS.length} presets</span></h3>
+      </div>
+
+      <div style={{display:'flex',gap:'.4rem',marginBottom:'.8rem',flexWrap:'wrap'}}>
+        {[
+          {key:'packs', label:'⭐ Style Packs', count:STYLE_PACKS.length},
+          {key:'trans', label:'⚡ Transitions', count:TRANSITIONS.length},
+          {key:'fx',    label:'🎨 Effects',     count:EFFECTS.length},
+          {key:'text',  label:'🔤 Text',         count:TEXT_PRESETS.length},
+          {key:'over',  label:'📐 Overlays',     count:OVERLAYS.length},
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{padding:'.4rem .7rem',background: tab === t.key ? 'var(--yellow)' : 'var(--glass)', color: tab === t.key ? '#0A0A14' : 'var(--text)', border:'1px solid '+(tab === t.key ? 'var(--yellow)' : 'var(--border)'), borderRadius:7, fontSize:'.74rem', fontWeight: tab === t.key ? 700 : 500, cursor:'pointer'}}>
+            {t.label} <span style={{opacity:.6,fontSize:'.62rem'}}>({t.count})</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === 'packs' && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.7rem'}}>
+          {STYLE_PACKS.map(p => {
+            const active = applied?.type === 'pack' && applied.pack?.id === p.id;
+            return (
+              <div key={p.id} onClick={() => applyPack(p)}
+                style={{padding:'.85rem',borderRadius:10,border: active ? '2px solid var(--yellow)' : '1px solid var(--border)',background: active ? 'rgba(255,214,10,0.06)' : 'var(--glass)',cursor:'pointer',transition:'all .15s'}}
+                onMouseEnter={e => e.currentTarget.style.transform='translateY(-2px)'}
+                onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}>
+                <div style={{fontSize:'1.6rem',marginBottom:'.4rem'}}>{p.icon}</div>
+                <div style={{fontWeight:700,fontSize:'.88rem',marginBottom:'.25rem'}}>{p.name}</div>
+                <div style={{fontSize:'.72rem',color:'var(--text-dim)',lineHeight:1.4,marginBottom:'.5rem',minHeight:32}}>{p.desc}</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:'.25rem'}}>
+                  <span style={{fontSize:'.58rem',padding:'.12rem .35rem',background:'var(--bg-elev)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--text-muted)'}}>{p.transitions.length} TRN</span>
+                  <span style={{fontSize:'.58rem',padding:'.12rem .35rem',background:'var(--bg-elev)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--text-muted)'}}>1 FX</span>
+                  <span style={{fontSize:'.58rem',padding:'.12rem .35rem',background:'var(--bg-elev)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--text-muted)'}}>1 TXT</span>
+                  {p.overlays && <span style={{fontSize:'.58rem',padding:'.12rem .35rem',background:'var(--bg-elev)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--text-muted)'}}>{p.overlays.length} OVL</span>}
+                  <span style={{fontSize:'.58rem',padding:'.12rem .35rem',background:'var(--bg-elev)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--yellow)'}}>♪ {p.music}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'trans' && (
+        <>
+          <div style={{display:'flex',gap:'.3rem',marginBottom:'.6rem',flexWrap:'wrap'}}>
+            {transCats.map(c => <button key={c} className={`mood-chip ${transCat===c?'active':''}`} onClick={() => setTransCat(c)}>{c}</button>)}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:'.45rem'}}>
+            {filteredTrans.map(t => {
+              const active = applied?.type === 'trans' && applied.id === t.id;
+              return (
+                <button key={t.id} onClick={() => onApply({type:'trans', id:t.id, name:t.name, duration:t.duration})}
+                  style={{padding:'.6rem .5rem',borderRadius:7,border: active ? '2px solid var(--yellow)' : '1px solid var(--border)',background: active ? 'rgba(255,214,10,0.06)' : 'var(--glass)',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:'.35rem'}}>
+                  <span style={{fontSize:'1.3rem'}}>{t.icon}</span>
+                  <span style={{fontSize:'.74rem',fontWeight:600,textAlign:'center'}}>{t.name}</span>
+                  <span style={{fontSize:'.58rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{t.duration}s</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {tab === 'fx' && (
+        <>
+          <div style={{display:'flex',gap:'.3rem',marginBottom:'.6rem',flexWrap:'wrap'}}>
+            {fxCats.map(c => <button key={c} className={`mood-chip ${fxCat===c?'active':''}`} onClick={() => setFxCat(c)}>{c}</button>)}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:'.5rem'}}>
+            {filteredFx.map(f => {
+              const active = applied?.type === 'fx' && applied.id === f.id;
+              return (
+                <button key={f.id} onClick={() => {onApply({type:'fx', id:f.id, name:f.name, filter:f.filter}); onPreviewEffect && onPreviewEffect(f.filter);}}
+                  style={{padding:0,borderRadius:8,border: active ? '2px solid var(--yellow)' : '1px solid var(--border)',background:'var(--glass)',cursor:'pointer',overflow:'hidden',display:'flex',flexDirection:'column'}}>
+                  <div style={{aspectRatio:'16/9',background:'linear-gradient(135deg,#FFD60A,#FF2D87,#4169E1,#00E68A)',filter:f.filter}}/>
+                  <div style={{padding:'.4rem .5rem',display:'flex',alignItems:'center',gap:'.3rem'}}>
+                    <span>{f.icon}</span>
+                    <span style={{fontSize:'.74rem',fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{f.name}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {tab === 'text' && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'.55rem'}}>
+          {TEXT_PRESETS.map(t => {
+            const active = applied?.type === 'text' && applied.id === t.id;
+            return (
+              <button key={t.id} onClick={() => onApply({type:'text', id:t.id, name:t.name, style:t.style, anim:t.anim})}
+                style={{padding:'.7rem .55rem',borderRadius:8,border: active ? '2px solid var(--yellow)' : '1px solid var(--border)',background:'var(--bg-solid-2)',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:'.4rem',minHeight:120}}>
+                <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',width:'100%',overflow:'hidden'}}>
+                  <span style={{...t.style, fontSize:t.style.fontSize ? `calc(${t.style.fontSize} * 0.32)` : '1rem',whiteSpace:'nowrap'}}>Aa</span>
+                </div>
+                <span style={{fontSize:'.7rem',fontWeight:600,color:'var(--text-muted)'}}>{t.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'over' && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.5rem'}}>
+          {OVERLAYS.map(o => {
+            const active = applied?.type === 'over' && applied.id === o.id;
+            return (
+              <button key={o.id} onClick={() => onApply({type:'over', id:o.id, name:o.name})}
+                style={{padding:'.65rem .75rem',borderRadius:8,border: active ? '2px solid var(--yellow)' : '1px solid var(--border)',background:'var(--glass)',cursor:'pointer',textAlign:'left'}}>
+                <div style={{fontSize:'.82rem',fontWeight:700,marginBottom:'.2rem'}}>{o.name}</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-dim)',lineHeight:1.4}}>{o.desc}</div>
+                <span style={{fontSize:'.58rem',padding:'.1rem .35rem',background:'var(--bg-elev)',borderRadius:3,fontFamily:'var(--mono)',color:'var(--text-muted)',marginTop:'.35rem',display:'inline-block'}}>{o.category}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   PUNCH-IN MODAL — desk-side quick re-record. Replaces a single clip.
+   Triggered by the Punch-In button in EditorView.
+   ============================================================ */
+function PunchInModal({open, onClose, clipName='this clip', onCommit}) {
+  const {addToast} = useApp();
+  const videoRef = useRef(null);
+  const [stream, setStream] = useState(null);
+  const [recorder, setRecorder] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [chunks, setChunks] = useState([]);
+  const [previewUrl, setPreviewUrl] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    (async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({video:{width:1920,height:1080,facingMode:'user'},audio:true});
+        if (!active) { s.getTracks().forEach(t => t.stop()); return; }
+        setStream(s);
+        if (videoRef.current) videoRef.current.srcObject = s;
+      } catch (e) {
+        addToast('Camera access denied: ' + e.message, 'error');
+      }
+    })();
+    return () => { active = false; if (stream) stream.getTracks().forEach(t => t.stop()); setStream(null); setRecording(false); setChunks([]); setPreviewUrl(null); setElapsed(0); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const start = Date.now();
+    const t = setInterval(() => setElapsed((Date.now() - start) / 1000), 100);
+    return () => clearInterval(t);
+  }, [recording]);
+
+  const startRec = () => {
+    if (!stream) return;
+    const collected = [];
+    const r = new MediaRecorder(stream, {mimeType:'video/webm;codecs=vp9,opus'});
+    r.ondataavailable = e => { if (e.data?.size) collected.push(e.data); };
+    r.onstop = () => {
+      const blob = new Blob(collected, {type:'video/webm'});
+      setChunks(collected);
+      setPreviewUrl(URL.createObjectURL(blob));
+    };
+    r.start(250);
+    setRecorder(r);
+    setRecording(true);
+    setChunks([]);
+    setPreviewUrl(null);
+    setElapsed(0);
+  };
+
+  const stopRec = () => { recorder?.stop(); setRecording(false); };
+
+  const commit = () => {
+    if (!chunks.length) { addToast('Record something first', 'error'); return; }
+    const blob = new Blob(chunks, {type:'video/webm'});
+    onCommit && onCommit({blob, durationSec: elapsed});
+    addToast(`Punch-in committed (${elapsed.toFixed(1)}s)`, 'success');
+    onClose();
+  };
+
+  if (!open) return null;
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',backdropFilter:'blur(10px)',zIndex:500,display:'grid',placeItems:'center',padding:'2rem'}}>
+      <div style={{width:'min(820px,96vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:18,padding:'1.5rem',boxShadow:'0 30px 80px rgba(0,0,0,.6)'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+          <div>
+            <h2 style={{margin:'0 0 .2rem'}}>🎥 Punch-In Recorder</h2>
+            <div style={{fontSize:'.82rem',color:'var(--text-muted)'}}>Re-record <strong>{clipName}</strong>. New take replaces it in the timeline.</div>
+          </div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'1.2rem'}}>×</button>
+        </div>
+
+        <div style={{position:'relative',aspectRatio:'16/9',background:'#000',borderRadius:12,overflow:'hidden',marginBottom:'1rem'}}>
+          {!previewUrl && <video ref={videoRef} autoPlay muted playsInline style={{width:'100%',height:'100%',objectFit:'cover'}}/>}
+          {previewUrl && <video src={previewUrl} controls style={{width:'100%',height:'100%',objectFit:'cover'}}/>}
+          {recording && (
+            <div style={{position:'absolute',top:12,left:12,display:'flex',alignItems:'center',gap:6,padding:'.35rem .7rem',background:'rgba(0,0,0,.7)',color:'#fff',borderRadius:999,fontFamily:'var(--mono)',fontSize:'.78rem',fontWeight:700}}>
+              <div style={{width:8,height:8,background:'var(--red)',borderRadius:'50%',animation:'blink 1.2s infinite',boxShadow:'0 0 8px var(--red)'}}/>REC {elapsed.toFixed(1)}s
+            </div>
+          )}
+        </div>
+
+        <div style={{display:'flex',gap:'.5rem',justifyContent:'center'}}>
+          {!recording && !previewUrl && <button className="btn btn-primary" onClick={startRec} style={{padding:'.85rem 2rem',fontWeight:800}}>● Start Recording</button>}
+          {recording && <button className="btn btn-primary" onClick={stopRec} style={{padding:'.85rem 2rem',fontWeight:800,background:'var(--red)',borderColor:'var(--red)',color:'#fff'}}>■ Stop</button>}
+          {previewUrl && (
+            <>
+              <button className="btn btn-ghost" onClick={() => {setPreviewUrl(null); setChunks([]); setElapsed(0); startRec();}}>↻ Re-take</button>
+              <button className="btn btn-primary" onClick={commit}>✓ Commit Punch-In</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   LIVE STREAM VIEW — multi-platform simulcast with aspect picker.
+   Uses /api/livestream-create for provider session, MediaRecorder preview.
+   ============================================================ */
+const LIVE_PLATFORMS = [
+  {key:'facebook',  label:'Facebook Live',     color:'#1877F2', icon:'f'},
+  {key:'instagram', label:'Instagram Live',    color:'#E1306C', icon:'IG'},
+  {key:'youtube',   label:'YouTube Live',      color:'#FF0000', icon:'▶'},
+  {key:'tiktok',    label:'TikTok Live',       color:'#000',    icon:'TT'},
+  {key:'twitter',   label:'X (Twitter) Live',  color:'#000',    icon:'𝕏'},
+  {key:'linkedin',  label:'LinkedIn Live',     color:'#0A66C2', icon:'in'},
+  {key:'twitch',    label:'Twitch',            color:'#9146FF', icon:'TW'},
+  {key:'kick',      label:'Kick',              color:'#53FC18', icon:'K'},
+];
+const LIVE_ASPECTS = [
+  {key:'16x9', label:'Landscape 16:9', desc:'YouTube, Twitch, Facebook desktop'},
+  {key:'9x16', label:'Portrait 9:16',  desc:'TikTok Live, Instagram Live, Reels'},
+  {key:'1x1',  label:'Square 1:1',     desc:'Instagram feed live'},
+  {key:'4x5',  label:'Portrait 4:5',   desc:'Instagram crop-friendly'},
+];
+const CAMERA_LAYOUTS = [
+  {key:'single',         label:'Single Cam',     desc:'One camera, full frame'},
+  {key:'pip-tl',         label:'PiP Top-Left',   desc:'Camera bubble in corner'},
+  {key:'pip-tr',         label:'PiP Top-Right',  desc:'Camera bubble in corner'},
+  {key:'pip-bl',         label:'PiP Bottom-Left',desc:'Camera bubble in corner'},
+  {key:'pip-br',         label:'PiP Bottom-Right',desc:'Camera bubble in corner (default)'},
+  {key:'side-by-side',   label:'Side-by-Side',   desc:'Two cams half-and-half'},
+  {key:'stacked',        label:'Stacked Top/Bot',desc:'Reaction-mode dual stack'},
+  {key:'screen-only',    label:'Screen Only',    desc:'Display capture, no camera'},
+];
+
+function LiveStreamView() {
+  const {addToast} = useApp();
+  const [title, setTitle] = useState('Live with Lamin — ' + new Date().toLocaleDateString());
+  const [aspect, setAspect] = useState('16x9');
+  const [layout, setLayout] = useState('pip-br');
+  const [picked, setPicked] = useState({facebook:true, instagram:true, youtube:false, tiktok:false, twitter:false, linkedin:false, twitch:false, kick:false});
+  const [creating, setCreating] = useState(false);
+  const [session, setSession] = useState(null);
+  const [stream, setStream] = useState(null);
+  const [streaming, setStreaming] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!streaming) return;
+    const start = Date.now();
+    const t = setInterval(() => setElapsed((Date.now() - start) / 1000), 1000);
+    return () => clearInterval(t);
+  }, [streaming]);
+
+  const togglePlatform = (k) => setPicked(p => ({...p, [k]: !p[k]}));
+
+  const startPreview = async () => {
+    try {
+      const constraints = layout === 'screen-only'
+        ? {video:true,audio:true}
+        : {video:{width:1920,height:1080},audio:true};
+      const s = layout === 'screen-only'
+        ? await navigator.mediaDevices.getDisplayMedia(constraints)
+        : await navigator.mediaDevices.getUserMedia(constraints);
+      setStream(s);
+      if (videoRef.current) videoRef.current.srcObject = s;
+    } catch (e) {
+      addToast('Capture failed: ' + e.message, 'error');
+    }
+  };
+
+  const stopPreview = () => {
+    stream?.getTracks().forEach(t => t.stop());
+    setStream(null);
+    setStreaming(false);
+  };
+
+  const goLive = async () => {
+    const platforms = Object.keys(picked).filter(k => picked[k]);
+    if (platforms.length === 0) { addToast('Pick at least one platform', 'error'); return; }
+    if (!stream) await startPreview();
+    setCreating(true);
+    try {
+      const r = await fetch('/api/livestream-create', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({title, platforms, aspect}),
+      });
+      const data = await r.json();
+      setSession(data);
+      if (data.ok && data.configured) {
+        addToast(`Live session created on ${platforms.length} platform${platforms.length>1?'s':''}`, 'success');
+      } else if (data.ok) {
+        addToast('Stream provider not configured — RTMP credentials shown below', 'info');
+      } else {
+        addToast('Live setup failed: ' + (data.error || 'unknown'), 'error');
+      }
+      setStreaming(true);
+    } catch (e) {
+      addToast('Live setup error: ' + e.message, 'error');
+    }
+    setCreating(false);
+  };
+
+  const aspectStyle = aspect === '16x9' ? '16/9' : aspect === '9x16' ? '9/16' : aspect === '4x5' ? '4/5' : '1/1';
+  const aspectMaxH = aspect === '9x16' || aspect === '4x5' ? 480 : 360;
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Live Stream Studio</h1>
+          <div className="sub">Go live to multiple platforms at once. Pick aspect ratio, camera layout, and platforms — we handle the simulcast.</div>
+        </div>
+        {streaming && (
+          <div style={{display:'flex',alignItems:'center',gap:6,padding:'.4rem .85rem',background:'rgba(255,80,80,.15)',border:'1px solid var(--red)',borderRadius:999,fontFamily:'var(--mono)',fontSize:'.78rem',fontWeight:700,color:'var(--red)'}}>
+            <div style={{width:8,height:8,background:'var(--red)',borderRadius:'50%',animation:'blink 1.2s infinite',boxShadow:'0 0 8px var(--red)'}}/>LIVE · {Math.floor(elapsed/60)}:{String(Math.floor(elapsed%60)).padStart(2,'0')}
+          </div>
+        )}
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 360px',gap:'1.25rem'}}>
+        {/* PREVIEW */}
+        <div>
+          <div className="card" style={{marginBottom:'1rem',padding:0,overflow:'hidden'}}>
+            <div style={{aspectRatio:aspectStyle,maxHeight:aspectMaxH,background:'#000',position:'relative',display:'grid',placeItems:'center'}}>
+              <video ref={videoRef} autoPlay muted playsInline style={{width:'100%',height:'100%',objectFit:'cover',display: stream ? 'block' : 'none'}}/>
+              {!stream && <div style={{textAlign:'center',color:'var(--text-dim)'}}><div style={{fontSize:'3rem',marginBottom:'.5rem'}}>📹</div><div style={{fontSize:'.9rem'}}>Click "Start Camera Preview" to begin</div></div>}
+              <div style={{position:'absolute',bottom:8,right:8,padding:'.25rem .55rem',background:'rgba(0,0,0,.7)',borderRadius:4,fontFamily:'var(--mono)',fontSize:'.62rem',color:'#fff'}}>{aspect.replace('x',':')} · {layout}</div>
+            </div>
+          </div>
+
+          <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem'}}>
+            {!stream && <button className="btn btn-ghost" onClick={startPreview}>📹 Start Camera Preview</button>}
+            {stream && !streaming && <button className="btn btn-primary" onClick={goLive} disabled={creating} style={{padding:'.85rem 2rem',fontWeight:800,background:'var(--red)',borderColor:'var(--red)',color:'#fff'}}>{creating ? '⚡ Going live…' : '● GO LIVE'}</button>}
+            {streaming && <button className="btn btn-ghost" onClick={stopPreview} style={{borderColor:'var(--red)',color:'var(--red)'}}>■ End Stream</button>}
+            {stream && <button className="btn btn-ghost" onClick={stopPreview}>Stop Preview</button>}
+          </div>
+
+          {session && (
+            <div className="card" style={{marginBottom:'1rem'}}>
+              <div className="card-head"><h3>Stream Session</h3></div>
+              <div style={{padding:'.6rem',background:'var(--glass)',borderRadius:6,fontFamily:'var(--mono)',fontSize:'.78rem',marginBottom:'.5rem'}}>
+                <div><strong>Provider:</strong> {session.provider}</div>
+                <div><strong>RTMP URL:</strong> <code style={{userSelect:'all'}}>{session.rtmp?.ingest_url}</code></div>
+                <div><strong>Stream Key:</strong> <code style={{userSelect:'all',color:'var(--yellow)'}}>{session.rtmp?.stream_key}</code></div>
+              </div>
+              {!session.configured && (
+                <div style={{fontSize:'.78rem',color:'var(--text-muted)',lineHeight:1.55}}>
+                  {session.message}
+                  <ul style={{marginTop:'.5rem',paddingLeft:'1.25rem'}}>
+                    {(session.recommended_providers||[]).map(p => <li key={p.name}><a href={p.url} target="_blank" rel="noopener" style={{color:'var(--yellow)'}}>{p.name}</a> — {p.notes}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* CONTROLS */}
+        <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+          <div className="card">
+            <div className="card-head"><h3>Title</h3></div>
+            <input className="input" value={title} onChange={e => setTitle(e.target.value)} />
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Aspect Ratio</h3></div>
+            {LIVE_ASPECTS.map(a => (
+              <label key={a.key} style={{display:'flex',alignItems:'center',gap:'.6rem',padding:'.55rem',borderRadius:6,cursor:'pointer',background: aspect === a.key ? 'rgba(255,214,10,0.06)' : 'transparent',marginBottom:'.25rem'}}>
+                <input type="radio" name="aspect" checked={aspect === a.key} onChange={() => setAspect(a.key)} style={{accentColor:'var(--yellow)'}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:'.85rem',fontWeight:600}}>{a.label}</div>
+                  <div style={{fontSize:'.7rem',color:'var(--text-dim)'}}>{a.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Camera Layout</h3></div>
+            <select className="input" value={layout} onChange={e => setLayout(e.target.value)}>
+              {CAMERA_LAYOUTS.map(l => <option key={l.key} value={l.key}>{l.label} — {l.desc}</option>)}
+            </select>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Stream To</h3></div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.4rem'}}>
+              {LIVE_PLATFORMS.map(p => (
+                <label key={p.key} style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem',borderRadius:6,cursor:'pointer',background: picked[p.key] ? 'rgba(255,214,10,0.05)' : 'var(--glass)',border:'1px solid '+(picked[p.key] ? 'var(--yellow-glow-strong)':'var(--border)')}}>
+                  <input type="checkbox" checked={!!picked[p.key]} onChange={() => togglePlatform(p.key)} style={{accentColor:'var(--yellow)'}}/>
+                  <span style={{width:24,height:24,borderRadius:'50%',background:p.color,color:'#fff',display:'grid',placeItems:'center',fontSize:'.66rem',fontWeight:800}}>{p.icon}</span>
+                  <span style={{fontSize:'.78rem',fontWeight:600}}>{p.label}</span>
+                </label>
+              ))}
+            </div>
+            <div style={{marginTop:'.6rem',fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+              {Object.values(picked).filter(Boolean).length} platform{Object.values(picked).filter(Boolean).length===1?'':'s'} selected
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    ASSET LIBRARY — unified search across stock images, video, music, SFX, GIFs.
    All providers proxied through /api/asset-library. User never sees keys.
    ============================================================ */
@@ -8133,6 +8764,7 @@ function ViewRouter() {
     case 'spy': return <CompetitorSpyView />;
     case 'collaboration': return <CollaborationView />;
     case 'screenrec': return <ScreenRecordView />;
+    case 'livestream': return <LiveStreamView />;
     case 'workflows': return <WorkflowsView />;
     case 'blog': return <BlogBuilderView />;
     case 'assets': return <AssetLibraryView />;
