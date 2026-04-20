@@ -29,13 +29,13 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 
 | Capability | Status | Notes |
 |---|---|---|
-| Stripe subscriptions | 🔴 | `/api/stripe-checkout.js` + `/api/stripe-webhook.js` |
-| Plan upgrade / downgrade | 🔴 | Customer Portal link from Settings |
+| Stripe subscriptions | ✅ | `/api/create-checkout` + `/api/stripe-webhook` (sync to subscriptions/profiles/plan_events) |
+| Plan upgrade / downgrade (self-service) | ✅ | `/api/stripe-portal` → Customer Portal link from user dropdown |
 | Usage metering (strategies/mo, blog posts/mo) | 🔴 | Counters per workspace; soft-throttle on free tier |
-| Annual billing (20% off) | 🔴 | Stripe price IDs for monthly + annual |
-| Tax handling | 🔴 | Stripe Tax automatic |
-| Invoicing | 🔴 | Stripe-hosted invoices |
-| Refunds / dunning | 🔴 | Stripe defaults |
+| Annual billing (20% off) | ✅ | PlanPicker has month/year toggle; price ID env vars |
+| Tax handling | 🟡 | Enable Stripe Tax in Dashboard — no code changes needed |
+| Invoicing | ✅ | Stripe-hosted invoices via Customer Portal |
+| Refunds / dunning | ✅ | Webhook handles `invoice.payment_failed` → marks past_due |
 
 ## 3. AI Integrations (Live)
 
@@ -50,7 +50,7 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 | Translation (batch fan-out) | ✅ | `/api/translate` | Anthropic |
 | Asset library (image/video/music/SFX/GIF) | ✅ | `/api/asset-library` | Pexels + Pixabay + Freesound + GIPHY + Tenor |
 | Auto-captions | ✅ | `/api/transcribe` | Deepgram (Nova-2, returns text + WebVTT) |
-| AI voice-over (multilingual) | 🔴 | `/api/synthesize` (planned) | ElevenLabs |
+| AI voice-over (multilingual) | ✅ | `/api/synthesize` | ElevenLabs (8 voices, 29 languages, Storage upload) |
 | Live stream simulcast | ✅ | `/api/livestream-create` | Restream.io (with manual RTMP fallback) |
 | Brain Score v1 (trained) | 🔴 | After 500 labeled pairs | XGBoost on `training_pairs` view |
 | Multi-modal Brain Score v2 | 🔴 | After 5K pairs | CLIP + Whisper embeddings |
@@ -59,17 +59,18 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 
 | Channel | Outbound | Inbound | Notes |
 |---|---|---|---|
-| Email (transactional) | ✅ Resend | n/a | strategy, packages, welcome sequence, lead magnet |
-| Email (marketing campaigns) | 🟡 | n/a | A2P checkbox + welcome sequence shipped; full campaign builder pending |
-| SMS / A2P 10DLC | 🔴 | 🔴 | Twilio campaign registration, opt-in flow shipped |
+| Email (transactional) | ✅ Resend | n/a | strategy, packages, welcome sequence, lead magnet, referral |
+| Email (marketing campaigns) | ✅ | n/a | EmailCampaignsView (8 templates) + `/api/send-campaign` (List-Unsubscribe headers) + per-recipient tracking |
+| SMS / A2P 10DLC | 🟡 | 🔴 | Opt-in flow + consent_log shipped; Twilio send not yet wired |
 | WordPress publish | ✅ | 🔴 | REST API + App Password |
 | Ghost publish | ✅ | 🔴 | Admin API + JWT |
 | Webhook (Zapier/n8n/Make) | ✅ | 🟡 | Outbound shipped; receive-webhook stub needed |
-| Instagram Graph API | 🔴 | 🟡 | Comment Monitor scaffold; needs Meta App Review |
-| TikTok Content Posting API | 🔴 | 🔴 | Apply for posting scope |
-| YouTube Data API | 🔴 | 🔴 | OAuth + upload + analytics |
-| LinkedIn Marketing API | 🔴 | 🔴 | Posts + analytics |
-| Facebook Pages API | 🔴 | 🟡 | Comment Monitor scaffold |
+| YouTube auto-post | ✅ | 🔴 | OAuth + Data API v3 resumable upload (`/api/social-post`) |
+| Instagram Graph API | ✅ | 🟡 | Reels container + publish (`/api/social-post`); Comment Monitor scaffold |
+| TikTok Content Posting | ✅ | 🔴 | Direct Post API + PULL_FROM_URL (approval required by TikTok) |
+| Facebook Pages API | ✅ | 🟡 | Page video + photo posts; Comment Monitor scaffold |
+| LinkedIn Marketing API | ✅ | 🔴 | UGC Posts (text/image; video upload coming) |
+| X (Twitter) API v2 | ✅ | 🔴 | Tweets via OAuth 2.0 + write scope |
 | GoHighLevel CRM sync | 🔴 | 🔴 | Custom field push for lead-magnet captures |
 
 ## 5. Storage & CDN
@@ -86,8 +87,8 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 
 | Capability | Status | Notes |
 |---|---|---|
-| Health endpoint | ✅ | `/api/health` reports integration readiness |
-| Error monitoring | 🔴 | Sentry (front + serverless) |
+| Health endpoint | ✅ | `/api/health` reports integration readiness (18 providers) |
+| Error monitoring | ✅ | Sentry CDN auto-loads when `window.SUPERNOVA_SENTRY_DSN` is set; replays on error |
 | Product analytics | 🔴 | PostHog or Segment |
 | Audit log viewer | 🔴 | Admin UI on `audit_log` |
 | Usage dashboard (API quota / cost) | 🔴 | Per-workspace token + image spend |
@@ -179,17 +180,35 @@ GIPHY_API_KEY            # GIF library
 TENOR_API_KEY            # GIF fallback (Google)
 UNSPLASH_ACCESS_KEY      # stock photo fallback
 
-# Future capability
-DEEPGRAM_API_KEY         # auto-captions on uploaded recordings
-ELEVENLABS_API_KEY       # AI voiceover for translations
-STRIPE_SECRET_KEY        # billing (when revenue features go live)
-STRIPE_WEBHOOK_SECRET    # billing webhook
-TWILIO_AUTH_TOKEN        # SMS (A2P 10DLC)
-TWILIO_ACCOUNT_SID       # SMS
-SENTRY_DSN               # error monitoring
-POSTHOG_API_KEY          # product analytics
-GHL_PIT                  # GoHighLevel CRM
-N8N_WEBHOOK_BASE         # custom workflow webhooks
+# Live capability (set when ready)
+DEEPGRAM_API_KEY                # auto-captions on uploaded recordings
+ELEVENLABS_API_KEY              # AI voiceover (8 voices, 29 languages)
+RESTREAM_TOKEN                  # multi-platform live simulcast
+
+# Billing
+STRIPE_SECRET_KEY               # plan checkout + portal
+STRIPE_WEBHOOK_SECRET           # subscription event sync
+STRIPE_PRICE_CREATOR_MONTH      # $19/mo
+STRIPE_PRICE_CREATOR_YEAR       # ($19 × 12 × 0.8)
+STRIPE_PRICE_PRO_MONTH          # $49/mo
+STRIPE_PRICE_PRO_YEAR
+SUPABASE_URL                    # used by stripe-webhook for service-role writes
+SUPABASE_SERVICE_ROLE_KEY       # required for webhooks + OAuth callback writes
+
+# Social posting (per-platform OAuth — each requires a developer app)
+GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET                # YouTube
+META_CLIENT_ID, META_CLIENT_SECRET                    # Instagram + Facebook
+TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET               # TikTok
+LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET            # LinkedIn
+TWITTER_CLIENT_ID, TWITTER_CLIENT_SECRET              # X (Twitter)
+SOCIAL_REDIRECT_URI             # default: https://your-domain/api/social-callback
+
+# SMS + monitoring + analytics + integrations
+TWILIO_AUTH_TOKEN, TWILIO_ACCOUNT_SID                 # A2P 10DLC SMS
+SENTRY_DSN                      # error monitoring (set window.SUPERNOVA_SENTRY_DSN at build time)
+POSTHOG_API_KEY                 # product analytics
+GHL_PIT                         # GoHighLevel CRM
+N8N_WEBHOOK_BASE                # custom workflow webhooks
 ```
 
 Fetch live status anytime via `GET /api/health`.

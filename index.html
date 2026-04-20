@@ -17,6 +17,31 @@
 <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script>
+// Sentry — lazy-loaded only if a DSN is exposed via window.SUPERNOVA_SENTRY_DSN
+// Inject the DSN at deploy time (Vercel build env → static replace) or via
+// localStorage flag for QA. Failure here is silent.
+(function(){
+  var dsn = window.SUPERNOVA_SENTRY_DSN || (typeof localStorage !== 'undefined' && localStorage.getItem('eos-sentry-dsn'));
+  if (!dsn) return;
+  var s = document.createElement('script');
+  s.src = 'https://browser.sentry-cdn.com/7.119.1/bundle.tracing.min.js';
+  s.crossOrigin = 'anonymous';
+  s.onload = function() {
+    if (window.Sentry) {
+      window.Sentry.init({
+        dsn: dsn,
+        environment: location.hostname.includes('vercel.app') ? 'production' : 'development',
+        release: 'supernova-editor@1.6.0',
+        tracesSampleRate: 0.1,
+        replaysSessionSampleRate: 0,
+        replaysOnErrorSampleRate: 1.0,
+      });
+    }
+  };
+  document.head.appendChild(s);
+})();
+</script>
 <style>
 /* ============================================================
    SUPERNOVA DESIGN TOKENS
@@ -1738,6 +1763,7 @@ function Sidebar() {
     {key:'referrals',label:'Refer & Earn',icon:Icons.userPlus,badge:'NEW'},
     {key:'comments',label:'Comment Monitor',icon:Icons.bell,badge:'NEW'},
     {key:'email',label:'Email Studio',icon:Icons.mail},
+    {key:'campaigns',label:'Email Campaigns',icon:Icons.send,badge:'NEW'},
     {key:'settings',label:'Settings',icon:Icons.gear},
     {key:'legal',label:'Terms & Privacy',icon:Icons.shield},
   ];
@@ -1807,6 +1833,17 @@ function SidebarUserChip() {
           <button onClick={() => {setOpen(false); setPlanPickerOpen(true);}} style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',cursor:'pointer',textAlign:'left',color:'var(--text)',fontSize:'.82rem',borderRadius:6}} onMouseEnter={e => e.currentTarget.style.background='var(--glass)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
             ⚡ Upgrade Plan
           </button>
+          <button onClick={async () => {
+            setOpen(false);
+            try {
+              const r = await fetch('/api/stripe-portal', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email: currentUser?.email})});
+              const data = await r.json();
+              if (data.ok && data.url) window.location.href = data.url;
+              else addToast(data.message || data.error || 'Stripe portal unavailable','info');
+            } catch(e) { addToast('Portal error: '+e.message,'error'); }
+          }} style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',cursor:'pointer',textAlign:'left',color:'var(--text)',fontSize:'.82rem',borderRadius:6}} onMouseEnter={e => e.currentTarget.style.background='var(--glass)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+            💳 Manage Billing
+          </button>
           <button onClick={() => {setOpen(false); navigator.clipboard.writeText(window.location.origin + '/?ref=' + (currentProfile?.referral_slug || '')); addToast('Referral link copied','success');}} style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',cursor:'pointer',textAlign:'left',color:'var(--text)',fontSize:'.82rem',borderRadius:6}} onMouseEnter={e => e.currentTarget.style.background='var(--glass)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
             🔗 Copy referral link
           </button>
@@ -1825,7 +1862,7 @@ function SidebarUserChip() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',legal:'Terms & Privacy',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',campaigns:'Email Campaigns',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -2915,6 +2952,9 @@ function EditorView() {
         onPreviewEffect={setPreviewFilter}
       />
 
+      {/* AI VOICEOVER */}
+      <VoiceoverPanel />
+
       {/* PUNCH-IN MODAL */}
       <PunchInModal
         open={punchInOpen}
@@ -3775,6 +3815,107 @@ function IntegrationsTab({settings, u, showKeys, toggleKey, addToast}) {
   );
 }
 
+// SocialConnectionsTab — OAuth Connect / Disconnect for IG, FB, YT, TT, LI, X.
+const SOCIAL_PROVIDER_META = [
+  {key:'youtube',   label:'YouTube',   color:'#FF0000', icon:'▶', desc:'Upload Shorts + long-form videos via Data API v3'},
+  {key:'instagram', label:'Instagram', color:'#E1306C', icon:'IG',desc:'Reels + posts via Instagram Graph API (business account required)'},
+  {key:'tiktok',    label:'TikTok',    color:'#000',    icon:'TT',desc:'Video upload via Content Posting API (approval required)'},
+  {key:'facebook',  label:'Facebook',  color:'#1877F2', icon:'f', desc:'Page video + photo posts'},
+  {key:'linkedin',  label:'LinkedIn',  color:'#0A66C2', icon:'in',desc:'Personal feed posts (text/image; video coming)'},
+  {key:'twitter',   label:'X (Twitter)',color:'#000',   icon:'𝕏',desc:'Tweets via API v2 (write scope)'},
+];
+
+function SocialConnectionsTab() {
+  const {currentUser, addToast} = useApp();
+  const [connections, setConnections] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!currentUser?.id) { setLoading(false); return; }
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) { setLoading(false); return; }
+    const rows = await sb.fetch('social_connections', {eq:{user_id: currentUser.id}});
+    setConnections(rows || []);
+    setLoading(false);
+  }, [currentUser?.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const connect = async (platform) => {
+    try {
+      const r = await fetch('/api/social-connect', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({platform, user_id: currentUser?.id || ''})
+      });
+      const data = await r.json();
+      if (data.ok && data.auth_url) {
+        window.location.href = data.auth_url;
+      } else {
+        addToast(data.message || 'Connection unavailable', 'info');
+        if (data.setup_steps) console.log(`[${platform} setup]`, data.setup_steps);
+      }
+    } catch (e) { addToast(e.message,'error'); }
+  };
+
+  const disconnect = async (platform) => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) return;
+    const conn = connections.find(c => c.platform === platform);
+    if (!conn) return;
+    await sb.delete('social_connections', conn.id);
+    addToast(`Disconnected ${platform}`, 'info');
+    load();
+  };
+
+  return (
+    <div style={{maxWidth:920}}>
+      <div className="card" style={{marginBottom:'1.25rem',background:'linear-gradient(135deg,rgba(78,168,255,0.06),rgba(255,214,10,0.03))',border:'1px solid var(--yellow-glow-strong)'}}>
+        <div style={{display:'flex',alignItems:'flex-start',gap:'1rem'}}>
+          <div style={{fontSize:'1.6rem'}}>📡</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:800,marginBottom:4}}>Connect once. Post everywhere.</div>
+            <div style={{fontSize:'.82rem',color:'var(--text-muted)',lineHeight:1.55}}>OAuth into the platforms you publish on. After that, the Publish view's "Post Now" buttons become live — videos, posts, captions go out from your account through our unified <code>/api/social-post</code>.</div>
+          </div>
+        </div>
+      </div>
+
+      {!currentUser && (
+        <div className="card" style={{textAlign:'center',padding:'2rem'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>🔐</div>
+          <div style={{fontWeight:700}}>Sign in first</div>
+          <div style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:'.75rem'}}>OAuth tokens are tied to your Supernova account.</div>
+        </div>
+      )}
+
+      {currentUser && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'.85rem'}}>
+          {SOCIAL_PROVIDER_META.map(p => {
+            const conn = connections.find(c => c.platform === p.key);
+            return (
+              <div key={p.key} className="card" style={{padding:'1rem',display:'flex',flexDirection:'column',gap:'.6rem'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'.6rem'}}>
+                  <div style={{width:38,height:38,borderRadius:'50%',background:p.color,color:'#fff',display:'grid',placeItems:'center',fontSize:'.85rem',fontWeight:800}}>{p.icon}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:'.95rem'}}>{p.label}</div>
+                    <div style={{fontSize:'.7rem',color:'var(--text-dim)'}}>{p.desc}</div>
+                  </div>
+                  {conn && <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'rgba(0,230,138,0.15)',color:'var(--green)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>● Connected</span>}
+                </div>
+                {conn && conn.username && <div style={{fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--mono)'}}>as @{conn.username}</div>}
+                {conn ? (
+                  <button className="btn btn-ghost btn-sm" onClick={() => disconnect(p.key)}>Disconnect</button>
+                ) : (
+                  <button className="btn btn-primary btn-sm" onClick={() => connect(p.key)}>Connect {p.label}</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 async function triggerWelcomeSequence(settings, addToast, onSent) {
   if (!settings.email) { addToast('Add your email in Profile first', 'error'); return; }
   try {
@@ -3833,7 +3974,7 @@ function SettingsView() {
   const toggleKey = (key) => setShowKeys(prev => ({...prev, [key]: !prev[key]}));
   const u = (key, val) => setSettings(prev => ({...prev, [key]: val}));
 
-  const tabs = [{key:'profile',label:'Profile'},{key:'integrations',label:'Integrations'},{key:'content',label:'Content & CRAFT'},{key:'appearance',label:'Appearance'},{key:'notifications',label:'Notifications'},{key:'teammates',label:'Teammates'}];
+  const tabs = [{key:'profile',label:'Profile'},{key:'integrations',label:'Integrations'},{key:'social',label:'Social Accounts'},{key:'content',label:'Content & CRAFT'},{key:'appearance',label:'Appearance'},{key:'notifications',label:'Notifications'},{key:'teammates',label:'Teammates'}];
   const [teammatesSub, setTeammatesSub] = useState('members');
   const [showInvite, setShowInvite] = useState(false);
   const [invEmail, setInvEmail] = useState('');
@@ -3921,6 +4062,7 @@ function SettingsView() {
       )}
 
       {settingsTab === 'integrations' && <IntegrationsTab settings={settings} u={u} showKeys={showKeys} toggleKey={toggleKey} addToast={addToast} />}
+      {settingsTab === 'social' && <SocialConnectionsTab />}
 
       {settingsTab === 'content' && (
         <div className="grid-2">
@@ -7939,6 +8081,288 @@ const STYLE_PACKS = [
 ];
 
 /* ============================================================
+   VOICEOVER PANEL — ElevenLabs TTS. Drop into EditorView or use standalone.
+   ============================================================ */
+const TTS_VOICES = [
+  {id:'rachel', label:'Rachel', desc:'Warm, conversational female (EN)'},
+  {id:'drew',   label:'Drew',   desc:'Confident male narrator (EN)'},
+  {id:'clyde',  label:'Clyde',  desc:'Warm storytelling male'},
+  {id:'bella',  label:'Bella',  desc:'Soft, intimate female'},
+  {id:'domi',   label:'Domi',   desc:'Strong, energetic female'},
+  {id:'antoni', label:'Antoni', desc:'Young, friendly male'},
+  {id:'thomas', label:'Thomas', desc:'Calm, measured male'},
+  {id:'glinda', label:'Glinda', desc:'Playful, witchy female'},
+];
+
+function VoiceoverPanel() {
+  const {addToast, latestStrategy} = useApp();
+  const [text, setText] = useState(() => latestStrategy?.output || '');
+  const [voice, setVoice] = useState('rachel');
+  const [stability, setStability] = useState(0.5);
+  const [similarity, setSimilarity] = useState(0.75);
+  const [style, setStyle] = useState(0.2);
+  const [busy, setBusy] = useState(false);
+  const [audioUrl, setAudioUrl] = useState(null);
+
+  const generate = async () => {
+    if (!text.trim()) { addToast('Enter text to voice', 'error'); return; }
+    if (text.length > 5000) { addToast('Max 5000 chars per chunk', 'error'); return; }
+    setBusy(true); setAudioUrl(null);
+    try {
+      const r = await fetch('/api/synthesize', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({text, voice_name: voice, stability, similarity_boost: similarity, style}),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Voiceover failed: ' + (data.error || 'unknown'), 'error');
+      } else if (data.audio_base64) {
+        const blob = b64toBlob(data.audio_base64, 'audio/mpeg');
+        setAudioUrl(URL.createObjectURL(blob));
+        addToast(`Voiceover generated (~${data.estimated_duration_seconds}s)`, 'success');
+      } else if (data.url) {
+        setAudioUrl(data.url);
+        addToast('Voiceover saved to assets bucket', 'success');
+      }
+    } catch (e) {
+      addToast('TTS error: ' + e.message, 'error');
+    }
+    setBusy(false);
+  };
+
+  const download = () => {
+    if (!audioUrl) return;
+    const a = document.createElement('a');
+    a.href = audioUrl; a.download = `voiceover-${voice}-${Date.now()}.mp3`; a.click();
+  };
+
+  return (
+    <div className="card" style={{marginBottom:'1rem',borderColor:'var(--yellow-glow-strong)'}}>
+      <div className="card-head">
+        <h3 style={{display:'flex',alignItems:'center',gap:'.5rem'}}>{Icons.bell} AI Voiceover <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'rgba(255,214,10,0.12)',color:'var(--yellow)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>POWERED BY ELEVENLABS</span></h3>
+      </div>
+
+      <textarea className="input" rows={5} placeholder="Paste script. Multilingual model handles 29 languages automatically."
+        value={text} onChange={e => setText(e.target.value)}
+        style={{marginBottom:'.6rem',fontFamily:'var(--mono)',fontSize:'.82rem'}}/>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem',marginBottom:'.6rem'}}>
+        <div>
+          <label style={{fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.2rem'}}>Voice</label>
+          <select className="input" value={voice} onChange={e => setVoice(e.target.value)}>
+            {TTS_VOICES.map(v => <option key={v.id} value={v.id}>{v.label} — {v.desc}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.2rem'}}>Char count</label>
+          <div className="input" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <span style={{fontFamily:'var(--mono)',fontSize:'.82rem'}}>{text.length}</span>
+            <span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color: text.length > 5000 ? 'var(--red)' : 'var(--text-dim)'}}>~{Math.ceil(text.split(/\s+/).filter(Boolean).length/2.6)}s</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.5rem',marginBottom:'.75rem'}}>
+        <label style={{fontSize:'.7rem',color:'var(--text-muted)'}}>Stability {stability.toFixed(2)}<input type="range" min="0" max="1" step="0.05" value={stability} onChange={e => setStability(+e.target.value)} style={{width:'100%',accentColor:'var(--yellow)'}}/></label>
+        <label style={{fontSize:'.7rem',color:'var(--text-muted)'}}>Similarity {similarity.toFixed(2)}<input type="range" min="0" max="1" step="0.05" value={similarity} onChange={e => setSimilarity(+e.target.value)} style={{width:'100%',accentColor:'var(--yellow)'}}/></label>
+        <label style={{fontSize:'.7rem',color:'var(--text-muted)'}}>Style {style.toFixed(2)}<input type="range" min="0" max="1" step="0.05" value={style} onChange={e => setStyle(+e.target.value)} style={{width:'100%',accentColor:'var(--yellow)'}}/></label>
+      </div>
+
+      <button className="btn btn-primary" disabled={busy} onClick={generate} style={{width:'100%'}}>
+        {busy ? '⚡ Generating voiceover…' : `Generate Voiceover (${text.length} chars)`}
+      </button>
+
+      {audioUrl && (
+        <div style={{marginTop:'.75rem',padding:'.6rem',background:'var(--glass)',borderRadius:8}}>
+          <audio controls src={audioUrl} style={{width:'100%',marginBottom:'.4rem'}}/>
+          <button className="btn btn-ghost btn-sm" onClick={download} style={{width:'100%'}}>⬇️ Download MP3</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function b64toBlob(b64, mime) {
+  const bin = atob(b64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return new Blob([buf], {type: mime});
+}
+
+/* ============================================================
+   EMAIL CAMPAIGNS VIEW — campaign builder + recipient lists + send/schedule
+   ============================================================ */
+const CAMPAIGN_TEMPLATES = [
+  {id:'product-launch', name:'🚀 Product Launch', subject:'Big news from {{brand}}', html:`<h2>We just shipped something for you, {{name}}.</h2><p>This is your launch announcement. Use Claude in the Strategy Engine to refine.</p><p style="margin-top:24px;"><a href="https://supernova-editor.vercel.app">Check it out →</a></p>`},
+  {id:'newsletter',     name:'📰 Weekly Newsletter', subject:'This week from {{brand}}', html:`<h2>What we shipped, what we learned</h2><p>Hey {{name}},</p><p><strong>This week:</strong> [insert highlights]</p><p><strong>What we learned:</strong> [insight]</p><p><strong>Try this:</strong> [actionable tip]</p>`},
+  {id:'flash-sale',     name:'⚡ Flash Sale (24h)', subject:'24 hours only — 50% off', html:`<h2 style="color:#FF8C00">50% off everything — today only.</h2><p>Hey {{name}}, this won't be repeated. Use code <strong>FLASH50</strong> at checkout.</p><p><a href="#" style="background:#FFD60A;color:#0A0A14;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:bold;">Claim Yours</a></p>`},
+  {id:'reactivation',   name:'💚 Win-Back', subject:'We miss you, {{name}}', html:`<h2>Hey {{name}}, it's been a minute.</h2><p>You haven't been in for a while. Here's what's new since you left: [list features]. Want a free month to come back?</p>`},
+  {id:'survey',         name:'📊 Customer Survey', subject:'Got 2 minutes? It really helps.', html:`<h2>Hey {{name}}, quick favor</h2><p>We're shaping next quarter. Your input on these 5 questions would mean a lot.</p><p><a href="#">Take the survey (2 min)</a></p>`},
+  {id:'announcement',   name:'📢 Announcement', subject:'Important update from {{brand}}', html:`<h2>Important update</h2><p>Hi {{name}}, here's what's changing and what it means for you.</p>`},
+  {id:'event-invite',   name:'🎟️ Event Invite', subject:'You\\'re invited — {{event}}', html:`<h2>{{event}} — {{date}}</h2><p>Hey {{name}}, save your spot before they're gone.</p><p><a href="#">RSVP</a></p>`},
+  {id:'thank-you',      name:'🙏 Thank You', subject:'Thank you, {{name}}', html:`<h2>Thank you for being here.</h2><p>I just wanted to send a personal note — thank you for being part of the journey. — {{from_name}}</p>`},
+];
+
+function EmailCampaignsView() {
+  const {addToast, currentProfile} = useApp();
+  const [campaigns, setCampaigns] = useState([]);
+  const [draft, setDraft] = useState(null);
+  const [recipientsRaw, setRecipientsRaw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [subscribers, setSubscribers] = useState([]);
+
+  const loadAll = useCallback(async () => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) return;
+    const wsId = sb.getWorkspaceId();
+    const wsFilter = wsId ? {workspace_id: wsId} : {};
+    const [c, s] = await Promise.all([
+      sb.fetch('email_campaigns', {eq: wsFilter, order:'created_at', ascending:false, limit:30}),
+      sb.fetch('subscribers',     {eq: {...wsFilter, status:'subscribed'}, order:'subscribed_at', ascending:false, limit:500}),
+    ]);
+    if (c) setCampaigns(c);
+    if (s) setSubscribers(s);
+  }, []);
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  const newFromTemplate = (tpl) => {
+    setDraft({
+      name: tpl.name + ' draft',
+      subject: tpl.subject,
+      html_body: tpl.html,
+      template: tpl.id,
+      preview_text: '',
+    });
+  };
+
+  const saveDraft = async () => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) { addToast('Connect Supabase first','error'); return; }
+    const wsId = sb.getWorkspaceId();
+    const row = {...draft, workspace_id: wsId, status:'draft'};
+    if (draft.id) {
+      await sb.update('email_campaigns', draft.id, row);
+    } else {
+      const r = await sb.insert('email_campaigns', row);
+      if (r?.[0]) setDraft({...draft, id: r[0].id});
+    }
+    addToast('Draft saved','success');
+    loadAll();
+  };
+
+  const sendNow = async () => {
+    if (!draft) { addToast('Pick a template first','error'); return; }
+    let recipients = recipientsRaw.split(/[\n,;]+/).map(s => s.trim()).filter(s => /^[^\s@]+@/.test(s)).map(email => ({email}));
+    if (recipients.length === 0) {
+      // Fall back to subscribers
+      recipients = subscribers.map(s => ({email: s.email, name: s.name}));
+    }
+    if (recipients.length === 0) { addToast('No recipients','error'); return; }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/send-campaign', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          campaign_id: draft.id || null,
+          subject: draft.subject, html: draft.html_body,
+          recipients,
+          from_name: currentProfile?.display_name || 'Supernova Editor',
+          workspace_id: window.SupabaseClient?.getWorkspaceId?.() || null,
+          supabase_url: localStorage.getItem('eos-sb-url'),
+          supabase_key: localStorage.getItem('eos-sb-key'),
+        })
+      });
+      const d = await r.json();
+      if (d.ok) addToast(`Sent to ${d.sent} recipients (${d.failed} failed)`, d.failed === 0 ? 'success' : 'info');
+      else addToast(d.error || 'Send failed','error');
+    } catch (e) { addToast(e.message,'error'); }
+    setBusy(false);
+    loadAll();
+  };
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Email Campaigns</h1>
+          <div className="sub">Templates, recipient lists, send + schedule. CAN-SPAM + List-Unsubscribe baked in.</div>
+        </div>
+        {draft && <button className="btn btn-primary" disabled={busy} onClick={sendNow}>{busy ? '⚡ Sending…' : '📨 Send Now'}</button>}
+      </div>
+
+      {!draft && (
+        <>
+          <div className="card" style={{marginBottom:'1.25rem'}}>
+            <div className="card-head"><h3>Pick a template</h3><span style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{CAMPAIGN_TEMPLATES.length} included</span></div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'.7rem'}}>
+              {CAMPAIGN_TEMPLATES.map(t => (
+                <div key={t.id} onClick={() => newFromTemplate(t)} className="card" style={{padding:'.85rem',cursor:'pointer',transition:'all .15s'}}
+                  onMouseEnter={e => {e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.borderColor='var(--yellow-glow-strong)';}}
+                  onMouseLeave={e => {e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.borderColor='var(--border)';}}>
+                  <div style={{fontWeight:700,fontSize:'.92rem',marginBottom:'.25rem'}}>{t.name}</div>
+                  <div style={{fontSize:'.72rem',color:'var(--text-dim)',fontStyle:'italic',marginBottom:'.4rem'}}>{t.subject}</div>
+                  <div style={{fontSize:'.7rem',color:'var(--text-muted)',lineHeight:1.4,maxHeight:48,overflow:'hidden'}}>{t.html.replace(/<[^>]+>/g,'').slice(0,90)}…</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Recent Campaigns</h3><button className="btn btn-ghost btn-sm" onClick={loadAll}>↻</button></div>
+            {campaigns.length === 0 && <div style={{padding:'1.5rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.85rem'}}>No campaigns yet — pick a template above.</div>}
+            {campaigns.map(c => (
+              <div key={c.id} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.55rem 0',borderBottom:'1px solid var(--border)'}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:'.88rem'}}>{c.name}</div>
+                  <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{c.subject}</div>
+                </div>
+                <span style={{fontSize:'.65rem',padding:'.18rem .45rem',background: c.status==='sent'?'rgba(0,230,138,0.15)':'var(--glass)',color: c.status==='sent'?'var(--green)':'var(--text-muted)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>{c.status}</span>
+                {c.sent_count > 0 && <span style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>{c.sent_count} sent</span>}
+                <button className="btn btn-ghost btn-sm" onClick={() => setDraft(c)}>Open</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {draft && (
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+          <div className="card">
+            <div className="card-head"><h3>Editor</h3><button className="btn btn-ghost btn-sm" onClick={() => setDraft(null)}>← Back</button></div>
+            <label className="field"><span className="lbl">Campaign name</span><input className="input" value={draft.name} onChange={e => setDraft({...draft, name:e.target.value})}/></label>
+            <label className="field"><span className="lbl">Subject line</span><input className="input" value={draft.subject} onChange={e => setDraft({...draft, subject:e.target.value})}/></label>
+            <label className="field"><span className="lbl">HTML body (use &lcub;&lcub;name&rcub;&rcub; for personalization)</span>
+              <textarea className="input" rows={14} value={draft.html_body} onChange={e => setDraft({...draft, html_body:e.target.value})} style={{fontFamily:'var(--mono)',fontSize:'.78rem'}}/>
+            </label>
+            <label className="field"><span className="lbl">Recipients (paste emails OR leave blank to use {subscribers.length} subscribers)</span>
+              <textarea className="input" rows={3} placeholder="alice@example.com, bob@example.com..." value={recipientsRaw} onChange={e => setRecipientsRaw(e.target.value)} style={{fontFamily:'var(--mono)',fontSize:'.78rem'}}/>
+            </label>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <button className="btn btn-ghost" onClick={saveDraft}>Save Draft</button>
+              <button className="btn btn-primary" disabled={busy} onClick={sendNow} style={{flex:1}}>{busy ? '⚡ Sending…' : '📨 Send Campaign'}</button>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Live Preview</h3></div>
+            <div style={{padding:'1rem',background:'#fff',color:'#222',borderRadius:8,minHeight:400}}>
+              <div style={{fontSize:'.78rem',color:'#666',marginBottom:'.5rem',fontFamily:'monospace'}}>
+                <strong>From:</strong> {currentProfile?.display_name || 'Supernova Editor'}<br/>
+                <strong>Subject:</strong> {draft.subject}
+              </div>
+              <hr style={{border:0,borderTop:'1px solid #eee',margin:'.75rem 0'}}/>
+              <div dangerouslySetInnerHTML={{__html: draft.html_body.replace(/\{\{name\}\}/g, 'Friend').replace(/\{\{brand\}\}/g, currentProfile?.display_name || 'Supernova')}}/>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    EFFECTS PANEL — drop-in for EditorView. Tabs: Style Packs / Transitions /
    Effects / Text / Overlays. One-click apply.
    ============================================================ */
@@ -8771,6 +9195,7 @@ function ViewRouter() {
     case 'referrals': return <ReferralsView />;
     case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
+    case 'campaigns': return <EmailCampaignsView />;
     case 'legal': return <LegalView />;
     case 'settings': return <SettingsView />;
     default: return <DashboardView />;

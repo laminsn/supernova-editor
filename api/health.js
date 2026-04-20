@@ -27,6 +27,14 @@ export default async function handler(req, res) {
     giphy:      {key: 'GIPHY_API_KEY',      ok: has('GIPHY_API_KEY'),      used_for: 'GIF library (primary)'},
     tenor:      {key: 'TENOR_API_KEY',      ok: has('TENOR_API_KEY'),      used_for: 'GIF library (Google fallback)'},
     unsplash:   {key: 'UNSPLASH_ACCESS_KEY',ok: has('UNSPLASH_ACCESS_KEY'),used_for: 'Stock image fallback'},
+    restream:   {key: 'RESTREAM_TOKEN',     ok: has('RESTREAM_TOKEN'),     used_for: 'Multi-platform live stream simulcast'},
+    stripe_webhook: {key: 'STRIPE_WEBHOOK_SECRET', ok: has('STRIPE_WEBHOOK_SECRET'), used_for: 'Stripe subscription event sync'},
+    google_oauth: {key: 'GOOGLE_CLIENT_ID', ok: has('GOOGLE_CLIENT_ID'),   used_for: 'YouTube auto-posting (OAuth)'},
+    meta_oauth: {key: 'META_CLIENT_ID',     ok: has('META_CLIENT_ID'),     used_for: 'Instagram + Facebook auto-posting (OAuth)'},
+    tiktok_oauth: {key: 'TIKTOK_CLIENT_KEY',ok: has('TIKTOK_CLIENT_KEY'),  used_for: 'TikTok auto-posting (OAuth)'},
+    linkedin_oauth: {key: 'LINKEDIN_CLIENT_ID', ok: has('LINKEDIN_CLIENT_ID'), used_for: 'LinkedIn auto-posting (OAuth)'},
+    twitter_oauth: {key: 'TWITTER_CLIENT_ID',   ok: has('TWITTER_CLIENT_ID'),  used_for: 'X (Twitter) auto-posting (OAuth)'},
+    supabase_service: {key: 'SUPABASE_SERVICE_ROLE_KEY', ok: has('SUPABASE_SERVICE_ROLE_KEY'), used_for: 'Server-side webhook + OAuth callback writes'},
   };
 
   const ready = Object.values(integrations).filter(i => i.ok).length;
@@ -35,7 +43,7 @@ export default async function handler(req, res) {
   return res.status(200).json({
     ok: true,
     service: 'supernova-editor',
-    version: 'v1.4.0',
+    version: 'v1.6.0',
     region: env.VERCEL_REGION || 'unknown',
     deployment: env.VERCEL_URL || 'local',
     timestamp: new Date().toISOString(),
