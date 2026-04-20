@@ -853,6 +853,25 @@ function AppProvider({children}) {
     if (tab) setLegalTab(tab);
     setView('legal');
   }, []);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentProfile, setCurrentProfile] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authGateOpen, setAuthGateOpen] = useState(false);
+  const [planPickerOpen, setPlanPickerOpen] = useState(false);
+  const [referralAttribution, setReferralAttribution] = useState(() => {
+    try { return localStorage.getItem('eos-ref-attribution') || null; } catch { return null; }
+  });
+  const captureReferral = useCallback((slug) => {
+    if (!slug) return;
+    setReferralAttribution(slug);
+    localStorage.setItem('eos-ref-attribution', slug);
+    localStorage.setItem('eos-ref-captured-at', new Date().toISOString());
+  }, []);
+  const signOut = useCallback(async () => {
+    if (window.SupabaseClient && window.SupabaseClient.isReady()) await window.SupabaseClient.signOut();
+    setCurrentUser(null);
+    setCurrentProfile(null);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -878,6 +897,60 @@ function AppProvider({children}) {
   }, []);
   const toggleTheme = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
 
+  // Bootstrap auth state and react to OAuth callback redirects.
+  useEffect(() => {
+    let detach = () => {};
+    const init = async () => {
+      const sb = window.SupabaseClient;
+      if (!sb || !sb.isReady()) { setAuthChecked(true); return; }
+      const session = await sb.getSession();
+      const user = session?.user || null;
+      setCurrentUser(user);
+      if (user) {
+        const profile = await sb.loadProfile(user.id);
+        setCurrentProfile(profile);
+        // Fire referral conversion if attributed
+        const ref = referralAttribution;
+        if (ref && profile && !profile.referred_by) {
+          fetch('/api/referral-conversion', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              referrer_slug: ref,
+              referred_user_id: user.id,
+              referred_email: user.email,
+              event:'signed_up',
+              supabase_url: localStorage.getItem('eos-sb-url'),
+              supabase_key: localStorage.getItem('eos-sb-key'),
+            })
+          }).catch(() => {});
+          localStorage.removeItem('eos-ref-attribution');
+        }
+      }
+      setAuthChecked(true);
+      detach = sb.onAuthStateChange(async (event, sess) => {
+        const u = sess?.user || null;
+        setCurrentUser(u);
+        if (u) {
+          const p = await sb.loadProfile(u.id);
+          setCurrentProfile(p);
+          if (event === 'SIGNED_IN') {
+            setAuthGateOpen(false);
+            // Show plan picker on first sign-in
+            if (!p?.plan || p.plan === 'free') {
+              setTimeout(() => setPlanPickerOpen(true), 600);
+            }
+          }
+        } else {
+          setCurrentProfile(null);
+        }
+      });
+    };
+    init();
+    return () => detach();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const value = useMemo(() => ({
     theme, toggleTheme, lang, setLang, t, view, setView, toasts, addToast,
     drawerOpen, setDrawerOpen, drawerTab, setDrawerTab, sidebarOpen, setSidebarOpen,
@@ -885,7 +958,10 @@ function AppProvider({children}) {
     vaultLoadHandler, setVaultLoadHandler,
     activeCampaign, setActiveCampaign, campaigns, setCampaigns,
     legalTab, setLegalTab, goToLegal,
-  }), [theme, lang, t, view, toasts, drawerOpen, drawerTab, sidebarOpen, cmdOpen, latestStrategy, vaultOpen, vaultLoadHandler, activeCampaign, campaigns, legalTab, addToast, toggleTheme, setActiveCampaign, goToLegal]);
+    currentUser, setCurrentUser, currentProfile, setCurrentProfile, authChecked, setAuthChecked,
+    authGateOpen, setAuthGateOpen, planPickerOpen, setPlanPickerOpen,
+    referralAttribution, captureReferral, signOut,
+  }), [theme, lang, t, view, toasts, drawerOpen, drawerTab, sidebarOpen, cmdOpen, latestStrategy, vaultOpen, vaultLoadHandler, activeCampaign, campaigns, legalTab, currentUser, currentProfile, authChecked, authGateOpen, planPickerOpen, referralAttribution, addToast, toggleTheme, setActiveCampaign, goToLegal, captureReferral, signOut]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
@@ -942,9 +1018,32 @@ const SupabaseClient = (() => {
       return data;
     },
     async signIn(email, password) { if (!client) return null; return await client.auth.signInWithPassword({email, password}); },
-    async signUp(email, password) { if (!client) return null; return await client.auth.signUp({email, password}); },
+    async signUp(email, password, meta = {}) { if (!client) return null; return await client.auth.signUp({email, password, options:{data: meta}}); },
+    async signInWithOAuth(provider, options = {}) {
+      if (!client) return null;
+      const redirectTo = options.redirectTo || window.location.origin;
+      return await client.auth.signInWithOAuth({provider, options: {redirectTo, ...options}});
+    },
+    async signInWithMagicLink(email, options = {}) {
+      if (!client) return null;
+      return await client.auth.signInWithOtp({email, options: {emailRedirectTo: options.redirectTo || window.location.origin}});
+    },
+    async resetPassword(email) { if (!client) return null; return await client.auth.resetPasswordForEmail(email, {redirectTo: window.location.origin + '?reset=1'}); },
     async signOut() { if (client) await client.auth.signOut(); },
     async getUser() { if (!client) return null; const {data} = await client.auth.getUser(); return data?.user || null; },
+    async getSession() { if (!client) return null; const {data} = await client.auth.getSession(); return data?.session || null; },
+    onAuthStateChange(cb) { if (!client) return () => {}; const {data} = client.auth.onAuthStateChange(cb); return () => data?.subscription?.unsubscribe?.(); },
+    async loadProfile(userId) {
+      if (!client || !userId) return null;
+      const rows = await this.fetch('profiles', {eq:{id: userId}, limit:1});
+      return rows?.[0] || null;
+    },
+    async upsertProfile(profile) {
+      if (!client) return null;
+      const {data, error} = await client.from('profiles').upsert(profile, {onConflict:'id'}).select();
+      if (error) { console.warn('profile upsert:', error.message); return null; }
+      return data?.[0];
+    },
   };
 })();
 
@@ -1209,7 +1308,15 @@ function SVGChart({data, dataKey, color, height = 280}) {
    LANDING PAGE — SUPERNOVA
    ============================================================ */
 function LandingPage() {
-  const {setView, toggleTheme, theme, t, lang, setLang, goToLegal} = useApp();
+  const {setView, toggleTheme, theme, t, lang, setLang, goToLegal, currentUser, setAuthGateOpen, setPlanPickerOpen} = useApp();
+  const launch = useCallback(() => {
+    if (currentUser) setView('dashboard');
+    else setAuthGateOpen(true);
+  }, [currentUser, setView, setAuthGateOpen]);
+  const launchPaid = useCallback(() => {
+    if (currentUser) setPlanPickerOpen(true);
+    else setAuthGateOpen(true);
+  }, [currentUser, setAuthGateOpen, setPlanPickerOpen]);
 
   return (
     <div>
@@ -1240,7 +1347,8 @@ function LandingPage() {
               <button className="icon-btn" onClick={toggleTheme} title="Toggle theme">
                 {theme === 'dark' ? Icons.sun : Icons.moon}
               </button>
-              <button className="btn btn-primary btn-sm" onClick={() => setView('dashboard')}>{t('launchApp')}</button>
+              {!currentUser && <button className="btn btn-ghost btn-sm" onClick={() => setAuthGateOpen(true)}>Sign In</button>}
+              <button className="btn btn-primary btn-sm" onClick={launch}>{currentUser ? 'Open App' : t('launchApp')}</button>
             </div>
           </div>
         </div>
@@ -1257,7 +1365,7 @@ function LandingPage() {
             The all-in-one content operating system that turns <strong>one idea</strong> into <strong>12 distinct asset types</strong> — Reel, Carousel, Long-Form Video, <strong>SEO Blog</strong>, Thumbnails, Email, Lead Magnet, Brain Score, Workflows, Vault, Collab Packages, and Comment Monitor. Across Instagram, TikTok, YouTube, LinkedIn, Facebook, WordPress, Ghost, and Email. <strong>Powered by Claude AI.</strong>
           </p>
           <div className="hero-ctas">
-            <button className="btn btn-primary btn-lg" onClick={() => setView('dashboard')}>{t('launchApp')}</button>
+            <button className="btn btn-primary btn-lg" onClick={launch}>{t('launchApp')}</button>
             <button className="btn btn-ghost btn-lg" onClick={() => document.getElementById('features')?.scrollIntoView({behavior:'smooth'})}>See Features</button>
           </div>
           <div className="hero-meta">
@@ -1472,7 +1580,7 @@ function LandingPage() {
                 <li className="dim">No collaboration packages</li>
                 <li className="dim">No email distribution</li>
               </ul>
-              <button className="btn btn-ghost price-cta" onClick={() => setView('dashboard')}>Start Free</button>
+              <button className="btn btn-ghost price-cta" onClick={launch}>Start Free</button>
             </div>
 
             <div className="price-card">
@@ -1490,7 +1598,7 @@ function LandingPage() {
                 <li>Collage Mode + Thumbnails Studio</li>
                 <li className="dim">No collaboration / team features</li>
               </ul>
-              <button className="btn btn-primary price-cta" onClick={() => setView('dashboard')}>Start Creator</button>
+              <button className="btn btn-primary price-cta" onClick={launchPaid}>Start Creator</button>
             </div>
 
             <div className="price-card featured">
@@ -1509,7 +1617,7 @@ function LandingPage() {
                 <li>5 team seats</li>
                 <li>Priority support · <span style={{color:'var(--yellow)'}}>Claude AI included</span></li>
               </ul>
-              <button className="btn btn-primary price-cta" onClick={() => setView('dashboard')}>Start Pro</button>
+              <button className="btn btn-primary price-cta" onClick={launchPaid}>Start Pro</button>
             </div>
 
             <div className="price-card">
@@ -1568,7 +1676,7 @@ function LandingPage() {
       <section className="final-cta">
         <h2>Start Creating.<br/>Stop Guessing.</h2>
         <p>One topic becomes 12 distinct asset types: Reel, Carousel, Long-Form, <strong>SEO Blog</strong>, Thumbnails, Email, Lead Magnet, Brain Score, Workflows, Vault, Collab Packages, Comment Monitor. Brain-scored. Teleprompter-recorded. Auto-deployed across IG, TikTok, YouTube, LinkedIn, Facebook, WordPress, Ghost, and Email. Powered by Claude AI.</p>
-        <button className="btn btn-lg" onClick={() => setView('dashboard')}>{t('launchApp')}</button>
+        <button className="btn btn-lg" onClick={launch}>{t('launchApp')}</button>
       </section>
 
       <div style={{textAlign:'center',padding:'1.25rem 1rem 0',fontFamily:'var(--mono)',fontSize:'.74rem',color:'var(--text-muted)',letterSpacing:'.04em'}}>
@@ -1626,6 +1734,7 @@ function Sidebar() {
     {key:'workflows',label:'Workflows',icon:Icons.zap,badge:'NEW'},
     {key:'blog',label:'Blog Builder',icon:Icons.type,badge:'NEW'},
     {key:'assets',label:'Asset Library',icon:Icons.music,badge:'NEW'},
+    {key:'referrals',label:'Refer & Earn',icon:Icons.userPlus,badge:'NEW'},
     {key:'comments',label:'Comment Monitor',icon:Icons.bell,badge:'NEW'},
     {key:'email',label:'Email Studio',icon:Icons.mail},
     {key:'settings',label:'Settings',icon:Icons.gear},
@@ -1655,13 +1764,58 @@ function Sidebar() {
           {Icons.search} <span style={{flex:1}}>Search...</span> <span style={{fontSize:'.65rem',padding:'.1rem .35rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:3}}>&#8984;K</span>
         </div>
       </div>
-      <div className="sidebar-footer">
-        <div className="user-chip">
-          <div className="avatar">L</div>
-          <div><div className="name">Lamin S. Ngobeh</div><div className="plan">PRO &middot; EMPIRE</div></div>
-        </div>
-      </div>
+      <SidebarUserChip />
     </aside>
+  );
+}
+
+function SidebarUserChip() {
+  const {currentUser, currentProfile, signOut, setAuthGateOpen, setPlanPickerOpen, addToast} = useApp();
+  const [open, setOpen] = useState(false);
+
+  if (!currentUser) {
+    return (
+      <div className="sidebar-footer">
+        <button onClick={() => setAuthGateOpen(true)} style={{display:'flex',alignItems:'center',gap:'.6rem',padding:'.55rem .75rem',width:'100%',background:'linear-gradient(135deg,rgba(255,214,10,0.12),rgba(255,140,0,0.06))',border:'1px solid var(--yellow-glow-strong)',borderRadius:'var(--radius-lg)',cursor:'pointer',color:'var(--text)'}}>
+          <div style={{width:32,height:32,borderRadius:'50%',background:'var(--gradient-warm)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,color:'#0A0A14',fontSize:'.85rem'}}>?</div>
+          <div style={{textAlign:'left',flex:1,minWidth:0}}>
+            <div style={{fontSize:'.82rem',fontWeight:700}}>Sign in / Sign up</div>
+            <div style={{fontSize:'.65rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>Free · 14-day Pro trial</div>
+          </div>
+        </button>
+      </div>
+    );
+  }
+
+  const displayName = currentProfile?.display_name || currentProfile?.first_name || (currentUser.email || '').split('@')[0];
+  const initial = (displayName || 'U').charAt(0).toUpperCase();
+  const planLabel = (currentProfile?.plan || 'free').toUpperCase();
+
+  return (
+    <div className="sidebar-footer" style={{position:'relative'}}>
+      <div className="user-chip" onClick={() => setOpen(o => !o)}>
+        <div className="avatar">{currentProfile?.avatar_url ? <img src={currentProfile.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/> : initial}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div className="name" style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{displayName}</div>
+          <div className="plan">{planLabel} · @{currentProfile?.referral_slug || '—'}</div>
+        </div>
+        <span style={{color:'var(--text-dim)',fontSize:'.7rem'}}>▾</span>
+      </div>
+      {open && (
+        <div style={{position:'absolute',bottom:'calc(100% + 6px)',left:'.75rem',right:'.75rem',background:'var(--bg-solid)',border:'1px solid var(--border)',borderRadius:10,boxShadow:'0 12px 30px rgba(0,0,0,.4)',zIndex:120,padding:'.4rem'}}>
+          <button onClick={() => {setOpen(false); setPlanPickerOpen(true);}} style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',cursor:'pointer',textAlign:'left',color:'var(--text)',fontSize:'.82rem',borderRadius:6}} onMouseEnter={e => e.currentTarget.style.background='var(--glass)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+            ⚡ Upgrade Plan
+          </button>
+          <button onClick={() => {setOpen(false); navigator.clipboard.writeText(window.location.origin + '/?ref=' + (currentProfile?.referral_slug || '')); addToast('Referral link copied','success');}} style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',cursor:'pointer',textAlign:'left',color:'var(--text)',fontSize:'.82rem',borderRadius:6}} onMouseEnter={e => e.currentTarget.style.background='var(--glass)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+            🔗 Copy referral link
+          </button>
+          <div style={{height:1,background:'var(--border)',margin:'.3rem 0'}}/>
+          <button onClick={async () => {setOpen(false); await signOut(); addToast('Signed out','info');}} style={{display:'block',width:'100%',padding:'.55rem .75rem',background:'transparent',border:'none',cursor:'pointer',textAlign:'left',color:'var(--red)',fontSize:'.82rem',borderRadius:6}} onMouseEnter={e => e.currentTarget.style.background='rgba(255,80,80,0.08)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+            ↗ Sign Out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1670,7 +1824,7 @@ function Sidebar() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',legal:'Terms & Privacy',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -7173,6 +7327,441 @@ function BlogBuilderView() {
 }
 
 /* ============================================================
+   AUTH GATE — modal sign-up / sign-in with Google + Apple + email.
+   Renders over the app when there's no current user and the user tries to
+   reach a gated feature. Does NOT block the public landing page.
+   ============================================================ */
+function AuthGate() {
+  const {authGateOpen, setAuthGateOpen, addToast, referralAttribution, goToLegal} = useApp();
+  const [mode, setMode] = useState('signup'); // signup | signin | magic | reset
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [busy, setBusy] = useState(null);
+  const [agreed, setAgreed] = useState(false);
+
+  if (!authGateOpen) return null;
+
+  const sb = window.SupabaseClient;
+  const ready = sb && sb.isReady();
+
+  const oauth = async (provider) => {
+    if (!ready) { addToast('Connect Supabase in Settings → Advanced first', 'error'); return; }
+    if (mode === 'signup' && !agreed) { addToast('Please accept the Terms first', 'error'); return; }
+    setBusy(provider);
+    try {
+      const {error} = await sb.signInWithOAuth(provider, {redirectTo: window.location.origin});
+      if (error) { addToast(`${provider} sign-in failed: ${error.message}`, 'error'); setBusy(null); }
+    } catch (e) {
+      addToast(e.message, 'error');
+      setBusy(null);
+    }
+  };
+
+  const submitEmail = async (e) => {
+    e.preventDefault();
+    if (!ready) { addToast('Supabase backend not connected. Settings → Advanced.', 'error'); return; }
+    if (!email || (mode !== 'magic' && mode !== 'reset' && !password)) { addToast('Fill all fields', 'error'); return; }
+    if (mode === 'signup' && !agreed) { addToast('Please accept the Terms first', 'error'); return; }
+    setBusy('email');
+    try {
+      let result;
+      if (mode === 'signup') {
+        result = await sb.signUp(email, password, {first_name: firstName, referrer_slug: referralAttribution || null});
+        if (!result?.error) addToast('Check your inbox to confirm your email', 'success');
+      } else if (mode === 'signin') {
+        result = await sb.signIn(email, password);
+        if (!result?.error) addToast('Welcome back', 'success');
+      } else if (mode === 'magic') {
+        result = await sb.signInWithMagicLink(email);
+        if (!result?.error) addToast('Magic link sent — check your inbox', 'success');
+      } else if (mode === 'reset') {
+        result = await sb.resetPassword(email);
+        if (!result?.error) addToast('Password reset email sent', 'success');
+      }
+      if (result?.error) addToast(result.error.message, 'error');
+    } catch (e2) {
+      addToast(e2.message, 'error');
+    }
+    setBusy(null);
+  };
+
+  const titleMap = {signup:'Create your account', signin:'Welcome back', magic:'Email me a magic link', reset:'Reset your password'};
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(10px)',zIndex:500,display:'grid',placeItems:'center',padding:'2rem',animation:'fadeUp .25s ease'}}>
+      <div style={{width:'min(440px, 96vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:18,padding:'2rem',boxShadow:'0 30px 80px rgba(0,0,0,0.6)',position:'relative'}}>
+        <button onClick={() => setAuthGateOpen(false)} style={{position:'absolute',top:14,right:14,background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'1.2rem',width:32,height:32,borderRadius:6}}>×</button>
+
+        <div style={{display:'flex',alignItems:'center',gap:'.75rem',marginBottom:'1.25rem'}}>
+          <div style={{width:38,height:38,borderRadius:9,background:'linear-gradient(135deg,#FFD60A,#FF8C00)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,color:'#0A0A14',fontSize:'1.1rem'}}>S</div>
+          <div>
+            <div style={{fontWeight:900,fontSize:'1rem'}}>SUPERNOVA EDITOR</div>
+            <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textTransform:'uppercase',letterSpacing:'.06em'}}>Powered by Claude AI</div>
+          </div>
+        </div>
+
+        <h2 style={{margin:'0 0 .35rem',fontSize:'1.45rem'}}>{titleMap[mode]}</h2>
+        <p style={{margin:'0 0 1.25rem',color:'var(--text-muted)',fontSize:'.85rem'}}>
+          {mode === 'signup' && 'Free to start. No credit card required. 14-day Pro trial included.'}
+          {mode === 'signin' && 'Pick up where you left off.'}
+          {mode === 'magic' && 'No password needed. We\'ll email you a one-time link.'}
+          {mode === 'reset' && 'We\'ll send a reset link to your email.'}
+        </p>
+
+        {referralAttribution && mode === 'signup' && (
+          <div style={{padding:'.55rem .75rem',background:'rgba(255,214,10,0.08)',border:'1px solid var(--yellow-glow)',borderRadius:8,marginBottom:'1rem',fontSize:'.78rem',display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <span style={{fontSize:'1rem'}}>🎁</span>
+            <span>Invited by <strong style={{color:'var(--yellow)'}}>@{referralAttribution}</strong> · Both of you earn $10 credit when you sign up.</span>
+          </div>
+        )}
+
+        {(mode === 'signup' || mode === 'signin') && (
+          <>
+            <div style={{display:'grid',gap:'.5rem',marginBottom:'1rem'}}>
+              <button onClick={() => oauth('google')} disabled={!!busy}
+                style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'.6rem',padding:'.75rem',background:'#fff',color:'#1a1a1a',border:'1px solid var(--border)',borderRadius:8,cursor:busy?'wait':'pointer',fontWeight:600,fontSize:'.9rem'}}>
+                <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+                {busy === 'google' ? 'Opening Google…' : 'Continue with Google'}
+              </button>
+              <button onClick={() => oauth('apple')} disabled={!!busy}
+                style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'.6rem',padding:'.75rem',background:'#000',color:'#fff',border:'1px solid #000',borderRadius:8,cursor:busy?'wait':'pointer',fontWeight:600,fontSize:'.9rem'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.24 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+                {busy === 'apple' ? 'Opening Apple…' : 'Continue with Apple'}
+              </button>
+            </div>
+
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem',margin:'1rem 0',color:'var(--text-dim)',fontSize:'.7rem',fontFamily:'var(--mono)',textTransform:'uppercase'}}>
+              <div style={{flex:1,height:1,background:'var(--border)'}}/>or<div style={{flex:1,height:1,background:'var(--border)'}}/>
+            </div>
+          </>
+        )}
+
+        <form onSubmit={submitEmail} style={{display:'flex',flexDirection:'column',gap:'.6rem'}}>
+          {mode === 'signup' && (
+            <input className="input" placeholder="First name" value={firstName} onChange={e => setFirstName(e.target.value)} required/>
+          )}
+          <input className="input" type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email"/>
+          {(mode === 'signup' || mode === 'signin') && (
+            <input className="input" type="password" placeholder="Password (min 8 chars)" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} autoComplete={mode==='signup'?'new-password':'current-password'}/>
+          )}
+
+          {mode === 'signup' && (
+            <label style={{display:'flex',alignItems:'flex-start',gap:'.5rem',fontSize:'.72rem',color:'var(--text-muted)',lineHeight:1.5,padding:'.4rem 0'}}>
+              <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{accentColor:'var(--yellow)',marginTop:2}}/>
+              <span>I agree to the <a href="?view=terms" onClick={(e)=>{e.preventDefault();setAuthGateOpen(false);setTimeout(()=>goToLegal('terms'),120);}} style={{color:'var(--yellow)'}}>Terms</a> and <a href="?view=privacy" onClick={(e)=>{e.preventDefault();setAuthGateOpen(false);setTimeout(()=>goToLegal('privacy'),120);}} style={{color:'var(--yellow)'}}>Privacy Policy</a>.</span>
+            </label>
+          )}
+
+          <button className="btn btn-primary" type="submit" disabled={busy === 'email'} style={{padding:'.85rem',fontWeight:700,fontSize:'.9rem'}}>
+            {busy === 'email' ? '⚡ Working…' :
+              mode === 'signup' ? 'Create Account' :
+              mode === 'signin' ? 'Sign In' :
+              mode === 'magic' ? 'Send Magic Link' : 'Send Reset Email'}
+          </button>
+        </form>
+
+        <div style={{marginTop:'1rem',fontSize:'.78rem',color:'var(--text-dim)',textAlign:'center',display:'flex',flexDirection:'column',gap:'.35rem'}}>
+          {mode !== 'signup' && <button onClick={() => setMode('signup')} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>Don't have an account? <span style={{color:'var(--yellow)',fontWeight:700}}>Sign up free</span></button>}
+          {mode !== 'signin' && <button onClick={() => setMode('signin')} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>Already a member? <span style={{color:'var(--yellow)',fontWeight:700}}>Sign in</span></button>}
+          {mode !== 'magic' && (mode === 'signin' || mode === 'signup') && <button onClick={() => setMode('magic')} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'.72rem'}}>Email me a magic link instead</button>}
+          {mode === 'signin' && <button onClick={() => setMode('reset')} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'.72rem'}}>Forgot password?</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PLAN PICKER — modal shown after first sign-in.
+   Calls /api/create-checkout for paid tiers; falls through to free.
+   ============================================================ */
+function PlanPicker() {
+  const {planPickerOpen, setPlanPickerOpen, currentUser, currentProfile, addToast} = useApp();
+  const [interval, setInterval] = useState('month');
+  const [busy, setBusy] = useState(null);
+
+  if (!planPickerOpen) return null;
+
+  const pickPlan = async (plan) => {
+    if (plan === 'free') {
+      const sb = window.SupabaseClient;
+      if (sb && sb.isReady() && currentProfile?.id) {
+        await sb.update('profiles', currentProfile.id, {plan:'free', updated_at: new Date().toISOString()});
+      }
+      addToast('Free plan active — start creating!', 'success');
+      setPlanPickerOpen(false);
+      return;
+    }
+    if (plan === 'enterprise') {
+      window.location.href = 'mailto:lamin@raraavismarketing.com?subject=Supernova%20Enterprise';
+      return;
+    }
+    setBusy(plan);
+    try {
+      const r = await fetch('/api/create-checkout', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          plan, interval, email: currentUser?.email,
+          profile_id: currentProfile?.id || currentUser?.id,
+          success_url: window.location.origin + '/?upgraded=1',
+          cancel_url: window.location.origin + '/?canceled=1',
+        })
+      });
+      const data = await r.json();
+      if (data.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      // Stripe not configured — gracefully start free trial
+      addToast(data.message || 'Free trial activated — Stripe coming soon', 'info');
+      const sb = window.SupabaseClient;
+      if (sb && sb.isReady() && currentProfile?.id) {
+        await sb.update('profiles', currentProfile.id, {plan, plan_status:'trialing'});
+      }
+      setPlanPickerOpen(false);
+    } catch (e) {
+      addToast('Checkout error: ' + e.message, 'error');
+    }
+    setBusy(null);
+  };
+
+  const PLANS = [
+    {id:'free',       name:'Free',       price:0,  desc:'See your first Brain Score, ship your first piece.', features:['5 strategies/mo','Brain Score (v0)','Vault (last 10)','Single-screen recording'], cta:'Continue Free'},
+    {id:'creator',    name:'Creator',    price:19, desc:'Solo creators publishing 4+ pieces/week.',           features:['Unlimited strategies','All 46 mega prompts','Multi-screen + teleprompter','Workflows + Blog Builder','Asset Library bundled'], cta:'Start 14-Day Trial', highlighted:false},
+    {id:'pro',        name:'Pro',        price:49, desc:'Brands running campaigns + collaborator networks.',  features:['Everything in Creator','3 brand workspaces','Native blog publish (WP+Ghost)','Collaboration packages','Comment Monitor','5 team seats'], cta:'Start 14-Day Trial', highlighted:true},
+    {id:'enterprise', name:'Enterprise', price:null, desc:'Agencies, multi-brand, regulated industries.',     features:['Unlimited workspaces','Dedicated Brain Score model','SOC 2 / HIPAA','Dedicated CSM','SAML SSO'], cta:'Contact Sales'},
+  ];
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',backdropFilter:'blur(10px)',zIndex:500,display:'grid',placeItems:'center',padding:'2rem',overflowY:'auto'}}>
+      <div style={{width:'min(1080px,96vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:18,padding:'2rem',boxShadow:'0 30px 80px rgba(0,0,0,0.6)',position:'relative'}}>
+        <button onClick={() => setPlanPickerOpen(false)} style={{position:'absolute',top:14,right:14,background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'1.2rem'}}>×</button>
+        <div style={{textAlign:'center',marginBottom:'1.5rem'}}>
+          <h2 style={{margin:'0 0 .35rem',fontSize:'1.6rem'}}>Pick your plan</h2>
+          <p style={{margin:0,color:'var(--text-muted)',fontSize:'.9rem'}}>14-day free trial on paid tiers · Cancel anytime · Annual saves 20%</p>
+          <div style={{display:'inline-flex',gap:0,marginTop:'1rem',background:'var(--glass)',borderRadius:8,padding:'.2rem'}}>
+            <button onClick={() => setInterval('month')} style={{padding:'.4rem 1rem',background: interval==='month' ? 'var(--yellow)' : 'transparent', color: interval==='month' ? '#0A0A14' : 'var(--text-muted)', border:'none',borderRadius:6,fontWeight:600,fontSize:'.78rem',cursor:'pointer'}}>Monthly</button>
+            <button onClick={() => setInterval('year')} style={{padding:'.4rem 1rem',background: interval==='year' ? 'var(--yellow)' : 'transparent', color: interval==='year' ? '#0A0A14' : 'var(--text-muted)', border:'none',borderRadius:6,fontWeight:600,fontSize:'.78rem',cursor:'pointer'}}>Annual <span style={{fontSize:'.65rem',opacity:.7}}>−20%</span></button>
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:'.85rem'}}>
+          {PLANS.map(p => {
+            const price = p.price !== null ? Math.round(p.price * (interval === 'year' ? 0.8 * 12 : 1)) : null;
+            return (
+              <div key={p.id} style={{padding:'1.25rem',borderRadius:12,border: p.highlighted ? '2px solid var(--yellow)' : '1px solid var(--border)',background: p.highlighted ? 'rgba(255,214,10,0.04)' : 'var(--glass)',position:'relative',display:'flex',flexDirection:'column'}}>
+                {p.highlighted && <div style={{position:'absolute',top:-10,left:'50%',transform:'translateX(-50%)',padding:'.18rem .55rem',background:'var(--yellow)',color:'#0A0A14',borderRadius:4,fontSize:'.6rem',fontWeight:800,fontFamily:'var(--mono)',textTransform:'uppercase',letterSpacing:'.08em'}}>Most popular</div>}
+                <div style={{fontWeight:700,fontSize:'.85rem',color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.08em'}}>{p.name}</div>
+                <div style={{margin:'.4rem 0 .35rem',fontFamily:'var(--display)',fontWeight:900,fontSize:'2rem',lineHeight:1}}>
+                  {price === null ? 'Custom' : `$${price}`}
+                  {price !== null && price > 0 && <span style={{fontSize:'.7rem',color:'var(--text-dim)',fontWeight:500}}>/{interval === 'year' ? 'yr' : 'mo'}</span>}
+                </div>
+                <div style={{fontSize:'.78rem',color:'var(--text-muted)',marginBottom:'.85rem',minHeight:36}}>{p.desc}</div>
+                <ul style={{listStyle:'none',padding:0,margin:'0 0 1rem',display:'flex',flexDirection:'column',gap:'.3rem',flex:1}}>
+                  {p.features.map((f,i) => <li key={i} style={{fontSize:'.78rem',color:'var(--text)',display:'flex',gap:'.4rem'}}><span style={{color:'var(--green)'}}>✓</span>{f}</li>)}
+                </ul>
+                <button className={p.highlighted ? 'btn btn-primary' : 'btn btn-ghost'} disabled={busy === p.id} onClick={() => pickPlan(p.id)} style={{width:'100%',fontWeight:700}}>
+                  {busy === p.id ? '⚡ …' : p.cta}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   REFERRALS VIEW — unique link + share buttons + invite-by-email + stats
+   ============================================================ */
+function ReferralsView() {
+  const {currentUser, currentProfile, addToast, setAuthGateOpen} = useApp();
+  const [stats, setStats] = useState({sent:0, signed_up:0, converted:0, reward_cents:0});
+  const [recent, setRecent] = useState([]);
+  const [bulkEmails, setBulkEmails] = useState('');
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const slug = currentProfile?.referral_slug || (currentUser?.email || '').split('@')[0] || 'yourname';
+  const referralUrl = `${window.location.origin}/?ref=${slug}`;
+  const referralName = currentProfile?.first_name || currentProfile?.display_name || (currentUser?.email || '').split('@')[0] || 'A friend';
+
+  const loadStats = useCallback(async () => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady() || !currentProfile?.id) return;
+    const rows = await sb.fetch('referrals', {eq:{referrer_id: currentProfile.id}, order:'created_at', ascending:false, limit:50});
+    if (!rows) return;
+    setRecent(rows.slice(0, 12));
+    setStats({
+      sent: rows.length,
+      signed_up: rows.filter(r => r.status === 'signed_up' || r.status === 'converted').length,
+      converted: rows.filter(r => r.status === 'converted').length,
+      reward_cents: rows.reduce((s, r) => s + (r.reward_amount_cents || 0), 0),
+    });
+  }, [currentProfile?.id]);
+
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(referralUrl);
+    addToast('Referral link copied', 'success');
+  };
+
+  const shareText = `${referralName} invited you to Supernova Editor — turn one topic into 12 production-ready content assets, powered by Claude AI.`;
+  const shareEncodedText = encodeURIComponent(shareText);
+  const shareEncodedUrl = encodeURIComponent(referralUrl);
+
+  const SHARE_TARGETS = [
+    {key:'facebook', label:'Facebook', color:'#1877F2', icon:'f', url: `https://www.facebook.com/sharer/sharer.php?u=${shareEncodedUrl}&quote=${shareEncodedText}`},
+    {key:'twitter',  label:'Twitter / X', color:'#000', icon:'𝕏', url: `https://twitter.com/intent/tweet?text=${shareEncodedText}&url=${shareEncodedUrl}`},
+    {key:'linkedin', label:'LinkedIn', color:'#0A66C2', icon:'in', url: `https://www.linkedin.com/sharing/share-offsite/?url=${shareEncodedUrl}`},
+    {key:'pinterest',label:'Pinterest', color:'#E60023', icon:'P', url: `https://pinterest.com/pin/create/button/?url=${shareEncodedUrl}&description=${shareEncodedText}`},
+    {key:'whatsapp', label:'WhatsApp', color:'#25D366', icon:'W', url: `https://wa.me/?text=${shareEncodedText}%20${shareEncodedUrl}`},
+    {key:'telegram', label:'Telegram', color:'#0088cc', icon:'✈', url: `https://t.me/share/url?url=${shareEncodedUrl}&text=${shareEncodedText}`},
+    {key:'email',    label:'Email',    color:'#666',    icon:'✉', url: `mailto:?subject=${encodeURIComponent(referralName + ' invited you to Supernova Editor')}&body=${shareEncodedText}%0A%0A${shareEncodedUrl}`},
+    {key:'sms',      label:'Text',     color:'#34C759', icon:'💬', url: `sms:?&body=${shareEncodedText}%20${shareEncodedUrl}`},
+  ];
+
+  // Instagram doesn't accept share URLs — copy link + open Instagram
+  const igShare = () => {
+    navigator.clipboard.writeText(`${shareText}\n\n${referralUrl}`);
+    addToast('Caption copied — paste into your Instagram story or post', 'success');
+    window.open('https://www.instagram.com/', '_blank');
+  };
+
+  const sendBulkInvites = async () => {
+    if (!currentProfile?.id) { addToast('Sign in first', 'error'); setAuthGateOpen(true); return; }
+    const emails = bulkEmails
+      .split(/[\n,;]+/)
+      .map(s => s.trim())
+      .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+    if (emails.length === 0) { addToast('Enter at least one valid email', 'error'); return; }
+    setSending(true);
+    let ok = 0, failed = 0;
+    for (const email of emails.slice(0, 50)) {
+      try {
+        const r = await fetch('/api/send-referral', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            to: email,
+            referrer_id: currentProfile.id,
+            referrer_slug: slug,
+            referrer_name: referralName,
+            message: bulkMessage,
+            channel: 'email',
+            supabase_url: localStorage.getItem('eos-sb-url'),
+            supabase_key: localStorage.getItem('eos-sb-key'),
+          })
+        });
+        const data = await r.json();
+        if (data.ok) ok++; else failed++;
+      } catch (e) { failed++; }
+    }
+    addToast(`Sent ${ok} invite${ok===1?'':'s'}${failed?` · ${failed} failed`:''}`, ok > 0 ? 'success' : 'error');
+    setBulkEmails('');
+    setBulkMessage('');
+    setSending(false);
+    loadStats();
+  };
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Refer & Earn</h1>
+          <div className="sub">Send your unique link. Earn $10 credit for every friend who signs up. They get $10 too.</div>
+        </div>
+      </div>
+
+      {!currentUser && (
+        <div className="card" style={{marginBottom:'1.25rem',border:'1px solid var(--yellow-glow-strong)',background:'rgba(255,214,10,0.04)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'1rem'}}>
+            <div style={{fontSize:'1.5rem'}}>👋</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:800}}>Sign in first to claim your unique link</div>
+              <div style={{fontSize:'.82rem',color:'var(--text-muted)'}}>Each link is tied to your username so we know who to credit.</div>
+            </div>
+            <button className="btn btn-primary" onClick={() => setAuthGateOpen(true)}>Sign in / Sign up</button>
+          </div>
+        </div>
+      )}
+
+      <div className="stats-grid" style={{marginBottom:'1.25rem'}}>
+        <div className="stat-card"><div className="label">Invites Sent</div><div className="value">{stats.sent}</div></div>
+        <div className="stat-card"><div className="label">Signed Up</div><div className="value">{stats.signed_up}</div></div>
+        <div className="stat-card"><div className="label">Converted (Paid)</div><div className="value">{stats.converted}</div></div>
+        <div className="stat-card"><div className="label">Credit Earned</div><div className="value">${(stats.reward_cents/100).toFixed(2)}</div></div>
+      </div>
+
+      <div className="card" style={{marginBottom:'1.25rem'}}>
+        <div className="card-head"><h3>Your unique link</h3></div>
+        <div style={{display:'flex',gap:'.5rem',alignItems:'center',marginBottom:'1rem'}}>
+          <code style={{flex:1,padding:'.75rem 1rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:8,fontFamily:'var(--mono)',fontSize:'.88rem',overflow:'auto',whiteSpace:'nowrap'}}>{referralUrl}</code>
+          <button className="btn btn-primary" onClick={copyLink}>📋 Copy</button>
+        </div>
+
+        <div style={{fontSize:'.72rem',fontFamily:'var(--mono)',color:'var(--text-dim)',textTransform:'uppercase',marginBottom:'.6rem',letterSpacing:'.06em'}}>Share to</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:'.5rem'}}>
+          {SHARE_TARGETS.map(t => (
+            <a key={t.key} href={t.url} target="_blank" rel="noopener"
+              style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'.4rem',padding:'.85rem .5rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',textDecoration:'none',color:'var(--text)',transition:'all .12s'}}
+              onMouseEnter={e => {e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.borderColor=t.color;}}
+              onMouseLeave={e => {e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.borderColor='var(--border)';}}>
+              <div style={{width:36,height:36,borderRadius:'50%',background:t.color,color:'#fff',display:'grid',placeItems:'center',fontSize:'1rem',fontWeight:800}}>{t.icon}</div>
+              <span style={{fontSize:'.72rem',fontWeight:600}}>{t.label}</span>
+            </a>
+          ))}
+          <button onClick={igShare}
+            style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'.4rem',padding:'.85rem .5rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:8,cursor:'pointer',color:'var(--text)',transition:'all .12s'}}
+            onMouseEnter={e => {e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.borderColor='#E1306C';}}
+            onMouseLeave={e => {e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.borderColor='var(--border)';}}>
+            <div style={{width:36,height:36,borderRadius:'50%',background:'linear-gradient(135deg,#F58529,#DD2A7B,#8134AF)',color:'#fff',display:'grid',placeItems:'center',fontSize:'1rem',fontWeight:800}}>IG</div>
+            <span style={{fontSize:'.72rem',fontWeight:600}}>Instagram</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:'1.25rem'}}>
+        <div className="card-head"><h3>📧 Invite friends by email</h3></div>
+        <div style={{fontSize:'.78rem',color:'var(--text-muted)',marginBottom:'.75rem'}}>Paste up to 50 email addresses (comma, semicolon, or newline-separated). We'll send a personalized invite to each.</div>
+        <textarea className="input" rows={3} placeholder="alice@friend.com, bob@friend.com..."
+          value={bulkEmails} onChange={e => setBulkEmails(e.target.value)}
+          style={{marginBottom:'.6rem',fontFamily:'var(--mono)',fontSize:'.82rem'}}/>
+        <textarea className="input" rows={2} placeholder="Optional personal note ('You'll love this — saves me hours every week')"
+          value={bulkMessage} onChange={e => setBulkMessage(e.target.value)}
+          style={{marginBottom:'.75rem',fontSize:'.82rem'}}/>
+        <button className="btn btn-primary" disabled={sending || !currentProfile?.id} onClick={sendBulkInvites} style={{width:'100%'}}>
+          {sending ? '⚡ Sending invites…' : currentProfile?.id ? 'Send Invites' : 'Sign in to send invites'}
+        </button>
+      </div>
+
+      {recent.length > 0 && (
+        <div className="card">
+          <div className="card-head"><h3>Recent invites</h3><button className="btn btn-ghost btn-sm" onClick={loadStats}>↻ Refresh</button></div>
+          {recent.map(r => (
+            <div key={r.id} style={{display:'flex',alignItems:'center',gap:'.75rem',padding:'.55rem 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{width:8,height:8,borderRadius:'50%',background: r.status==='converted'?'var(--green)':r.status==='signed_up'?'var(--yellow)':'var(--text-dim)'}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:'.85rem',fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.referred_email || r.referred_user_id || 'Direct link'}</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>
+                  via {r.channel || 'link'} · {new Date(r.created_at).toLocaleDateString()}
+                  {r.signed_up_at && ` · signed up ${new Date(r.signed_up_at).toLocaleDateString()}`}
+                </div>
+              </div>
+              <span style={{fontSize:'.65rem',padding:'.18rem .45rem',background:'var(--glass)',color:'var(--text-muted)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>{r.status}</span>
+              {r.reward_amount_cents > 0 && <span style={{fontSize:'.7rem',color:'var(--green)',fontWeight:700}}>+${(r.reward_amount_cents/100).toFixed(2)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    ASSET LIBRARY — unified search across stock images, video, music, SFX, GIFs.
    All providers proxied through /api/asset-library. User never sees keys.
    ============================================================ */
@@ -7547,6 +8136,7 @@ function ViewRouter() {
     case 'workflows': return <WorkflowsView />;
     case 'blog': return <BlogBuilderView />;
     case 'assets': return <AssetLibraryView />;
+    case 'referrals': return <ReferralsView />;
     case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
     case 'legal': return <LegalView />;
@@ -7854,20 +8444,32 @@ function LeadMagnetView({magnetId}) {
    ROOT APP
    ============================================================ */
 function App() {
-  const {view, setView, setLegalTab} = useApp();
-  // Route handling on first load: ?magnet=, ?view=, ?unsubscribe=
+  const {view, setView, setLegalTab, captureReferral, setAuthGateOpen, addToast} = useApp();
+  // Route handling on first load: ?magnet=, ?view=, ?unsubscribe=, ?ref=, ?upgraded=
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const magnetId = urlParams?.get('magnet');
   const queryView = urlParams?.get('view');
   const unsubscribeEmail = urlParams?.get('unsubscribe');
+  const refSlug = urlParams?.get('ref');
+  const upgraded = urlParams?.get('upgraded');
 
   useEffect(() => {
+    // Capture referral attribution on first hit
+    if (refSlug) {
+      captureReferral(refSlug);
+      // Open auth gate so the visitor can convert immediately
+      setTimeout(() => setAuthGateOpen(true), 800);
+    }
+    if (upgraded) {
+      addToast('Welcome to your new plan! 🎉', 'success');
+    }
+
     if (queryView && ['terms','privacy','sms','email'].includes(queryView)) {
       setLegalTab(queryView);
       setView('legal');
     } else if (queryView === 'legal') {
       setView('legal');
-    } else if (queryView && ['workflows','blog','dashboard','create','pricing'].includes(queryView)) {
+    } else if (queryView && ['workflows','blog','dashboard','create','pricing','referrals','assets'].includes(queryView)) {
       setView(queryView);
     }
     if (unsubscribeEmail) {
@@ -7903,6 +8505,8 @@ function App() {
       <ToastContainer />
       <CommandPalette />
       <StrategyVaultDrawer />
+      <AuthGate />
+      <PlanPicker />
     </>
   );
 }

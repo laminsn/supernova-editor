@@ -1,0 +1,165 @@
+-- ============================================================
+-- SUPERNOVA EDITOR — Auth + Referrals + Subscriptions schema
+-- Run in Supabase SQL Editor (idempotent).
+-- ============================================================
+
+-- profiles: 1-row-per-user, keyed off auth.users.id. Stores referral_slug + plan.
+CREATE TABLE IF NOT EXISTS profiles (
+  id uuid PRIMARY KEY,
+  email text UNIQUE,
+  first_name text,
+  last_name text,
+  display_name text,
+  avatar_url text,
+  referral_slug text UNIQUE NOT NULL,
+  referred_by uuid REFERENCES profiles(id),
+  plan text NOT NULL DEFAULT 'free',
+  plan_status text NOT NULL DEFAULT 'active',
+  workspace_id uuid,
+  marketing_email_opt_in boolean DEFAULT false,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS profiles_referral_slug_idx ON profiles(referral_slug);
+CREATE INDEX IF NOT EXISTS profiles_email_idx ON profiles(email);
+CREATE INDEX IF NOT EXISTS profiles_referred_by_idx ON profiles(referred_by);
+
+-- referrals: each invite or attribution event
+CREATE TABLE IF NOT EXISTS referrals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  referrer_id uuid REFERENCES profiles(id),
+  referrer_slug text,
+  referred_email text,
+  referred_user_id uuid REFERENCES profiles(id),
+  channel text,
+  status text NOT NULL DEFAULT 'sent',
+  message text,
+  utm_source text,
+  utm_campaign text,
+  ip inet,
+  user_agent text,
+  reward_amount_cents int DEFAULT 0,
+  reward_status text DEFAULT 'pending',
+  created_at timestamptz DEFAULT now(),
+  signed_up_at timestamptz,
+  converted_at timestamptz,
+  rewarded_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals(referrer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS referrals_referred_user_idx ON referrals(referred_user_id);
+CREATE INDEX IF NOT EXISTS referrals_referred_email_idx ON referrals(referred_email);
+CREATE INDEX IF NOT EXISTS referrals_status_idx ON referrals(status);
+
+-- subscriptions: Stripe + manual. One row per active subscription.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id uuid REFERENCES profiles(id),
+  workspace_id uuid,
+  stripe_customer_id text,
+  stripe_subscription_id text UNIQUE,
+  plan text NOT NULL,
+  interval text NOT NULL DEFAULT 'month',
+  amount_cents int,
+  currency text DEFAULT 'usd',
+  status text NOT NULL DEFAULT 'active',
+  trial_ends_at timestamptz,
+  current_period_start timestamptz,
+  current_period_end timestamptz,
+  cancel_at_period_end boolean DEFAULT false,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS subscriptions_profile_idx ON subscriptions(profile_id);
+CREATE INDEX IF NOT EXISTS subscriptions_status_idx ON subscriptions(status);
+
+-- plan_events: audit log of plan changes for billing reconciliation
+CREATE TABLE IF NOT EXISTS plan_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id uuid REFERENCES profiles(id),
+  event text NOT NULL,
+  from_plan text,
+  to_plan text,
+  source text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS plan_events_profile_idx ON plan_events(profile_id, created_at DESC);
+
+-- ============================================================
+-- Helper: generate a unique referral_slug from a base name.
+-- Tries lowercase first name, falls back to first-last, then appends counter.
+-- ============================================================
+CREATE OR REPLACE FUNCTION generate_referral_slug(base_name text) RETURNS text AS $$
+DECLARE
+  base_slug text;
+  candidate text;
+  counter int := 0;
+BEGIN
+  base_slug := regexp_replace(lower(coalesce(base_name, 'creator')), '[^a-z0-9]+', '', 'g');
+  IF base_slug = '' OR length(base_slug) < 2 THEN
+    base_slug := 'creator';
+  END IF;
+  candidate := base_slug;
+  WHILE EXISTS (SELECT 1 FROM profiles WHERE referral_slug = candidate) LOOP
+    counter := counter + 1;
+    candidate := base_slug || counter::text;
+  END LOOP;
+  RETURN candidate;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- Trigger: auto-create profile on auth.users insert with unique slug.
+-- ============================================================
+CREATE OR REPLACE FUNCTION handle_new_auth_user() RETURNS trigger AS $$
+DECLARE
+  base text;
+BEGIN
+  base := coalesce(
+    new.raw_user_meta_data->>'first_name',
+    split_part(coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''), ' ', 1),
+    split_part(coalesce(new.email, 'creator@'), '@', 1)
+  );
+  INSERT INTO profiles (id, email, first_name, display_name, avatar_url, referral_slug)
+  VALUES (
+    new.id,
+    new.email,
+    base,
+    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', base),
+    new.raw_user_meta_data->>'avatar_url',
+    generate_referral_slug(base)
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_auth_user();
+
+-- ============================================================
+-- Permissive demo policies (matches existing pattern).
+-- TIGHTEN before public launch — see ENTERPRISE.md section 1.
+-- ============================================================
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS profiles_self_read ON profiles;
+CREATE POLICY profiles_self_read ON profiles FOR SELECT USING (true);
+DROP POLICY IF EXISTS profiles_self_update ON profiles;
+CREATE POLICY profiles_self_update ON profiles FOR UPDATE USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS profiles_insert ON profiles;
+CREATE POLICY profiles_insert ON profiles FOR INSERT WITH CHECK (true);
+
+ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS referrals_all ON referrals;
+CREATE POLICY referrals_all ON referrals FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS subscriptions_all ON subscriptions;
+CREATE POLICY subscriptions_all ON subscriptions FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE plan_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plan_events_all ON plan_events;
+CREATE POLICY plan_events_all ON plan_events FOR ALL USING (true) WITH CHECK (true);
