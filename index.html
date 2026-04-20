@@ -12,6 +12,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&f[]=satoshi@300,400,500,700,900&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Brand-kit font pairings (Anton, Inter, Space Grotesk, VT323, Major Mono Display, Cormorant Garamond, Lora, Bebas Neue, IBM Plex Mono, Playfair Display, Manrope, Bricolage Grotesque, DM Sans) -->
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;700;900&family=Space+Grotesk:wght@400;500;700&family=VT323&family=Major+Mono+Display&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lora:wght@400;500;700&family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,700&family=Manrope:wght@400;600;800&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,900&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -263,6 +265,28 @@ nav.landing-nav .glass-nav{background:rgba(5,5,8,0.6);backdrop-filter:blur(24px)
 .marquee-track span{margin:0 2rem}
 .marquee-track .sep{opacity:.3}
 @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* TEMPLATE LIBRARY KEYFRAMES — referenced by TEXT_PRESETS, CAPTION_STYLES, TRANSITIONS */
+@keyframes kinetic{0%{opacity:0;transform:translateY(40px) scale(.6) rotate(-3deg)}60%{opacity:1;transform:translateY(-8px) scale(1.08) rotate(2deg)}100%{opacity:1;transform:translateY(0) scale(1) rotate(0)}}
+@keyframes typewriter{from{width:0}to{width:100%}}
+@keyframes glitch-text{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,-1px)}80%{transform:translate(1px,1px)}}
+@keyframes gradient-wipe{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes karaoke{0%{color:rgba(255,255,255,.4)}50%,100%{color:#fff}}
+@keyframes karaoke-fill{from{background-size:0% 100%}to{background-size:100% 100%}}
+@keyframes slide-in-left{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:translateX(0)}}
+@keyframes fade-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pop-in{0%{opacity:0;transform:scale(.4)}70%{opacity:1;transform:scale(1.12)}100%{opacity:1;transform:scale(1)}}
+@keyframes shake{0%,100%{transform:translate(0)}25%{transform:translate(-4px,2px)}50%{transform:translate(4px,-2px)}75%{transform:translate(-2px,-2px)}}
+@keyframes word-reveal{from{opacity:0;transform:translateY(20px) scale(.92)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes headline-3d{from{opacity:0;transform:perspective(800px) rotateX(-90deg) translateY(20px)}to{opacity:1;transform:perspective(800px) rotateX(0) translateY(0)}}
+@keyframes liquid-fill{from{background-size:100% 0%}to{background-size:100% 100%}}
+@keyframes wave-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes chrome-sheen{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes split-flap{from{transform:rotateX(90deg);opacity:0}to{transform:rotateX(0);opacity:1}}
+@keyframes neon-flicker{0%,18%,22%,25%,53%,57%,100%{text-shadow:0 0 4px currentColor,0 0 11px currentColor,0 0 19px currentColor,0 0 40px currentColor}20%,24%,55%{text-shadow:none}}
+@keyframes draw-on{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
+@keyframes zoom-impact{0%{opacity:0;transform:scale(0)}60%{opacity:1;transform:scale(1.2)}100%{opacity:1;transform:scale(1)}}
+@keyframes stamp-pop{0%{opacity:0;transform:scale(2) rotate(-12deg)}70%{opacity:1;transform:scale(.95) rotate(-8deg)}100%{opacity:1;transform:scale(1) rotate(-8deg)}}
 
 /* SECTIONS */
 section.sec{padding:clamp(4rem,8vw,7rem) var(--pad);position:relative}
@@ -5043,6 +5067,18 @@ function CollageModeView() {
   ]);
   const [selectedStyle, setSelectedStyle] = useState(COLLAGE_STYLES[0]);
   const [selectedMusic, setSelectedMusic] = useState(COLLAGE_MUSIC[0]);
+  const [selectedVideoTemplate, setSelectedVideoTemplate] = useState(null);
+  const [selectedBrandKit, setSelectedBrandKit] = useState(BRAND_KITS[0]);
+  const [selectedCaptionStyle, setSelectedCaptionStyle] = useState(CAPTION_STYLES[0]);
+  const applyVideoTemplate = (tpl) => {
+    setSelectedVideoTemplate(tpl);
+    const kit = BRAND_KITS.find(k => k.id === tpl.defaultBrandKit);
+    if (kit) setSelectedBrandKit(kit);
+    const collageStyle = COLLAGE_STYLES.find(s => s.id === tpl.defaultStylePack) || COLLAGE_STYLES[0];
+    setSelectedStyle(collageStyle);
+    const music = COLLAGE_MUSIC.find(m => m.mood?.toLowerCase().includes(tpl.musicMood)) || COLLAGE_MUSIC[0];
+    setSelectedMusic(music);
+  };
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -5141,8 +5177,12 @@ function CollageModeView() {
                   {/* Overlay effects */}
                   <div style={{position:'absolute',inset:0,background:'linear-gradient(to top, rgba(0,0,0,.7) 0%, transparent 40%)',zIndex:1}}></div>
                   <div style={{position:'absolute',bottom:16,left:16,right:16,zIndex:2}}>
-                    {captionsOn && <div style={{fontFamily:'var(--display)',fontSize:'1.2rem',fontWeight:800,color:'#fff',textShadow:'2px 2px 4px rgba(0,0,0,.8)',marginBottom:'.25rem'}}>Your AI-Generated Collage</div>}
-                    <div style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'rgba(255,255,255,.6)'}}>{selectedStyle.name} &middot; {selectedMusic.name}</div>
+                    {captionsOn && (
+                      <div style={{marginBottom:'.25rem',fontFamily:selectedBrandKit.fonts.display}}>
+                        <KaraokeRenderer text="Your AI-generated collage is ready" currentTime={(Date.now()/1000) % 6} captionStyleId={selectedCaptionStyle.id} />
+                      </div>
+                    )}
+                    <div style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'rgba(255,255,255,.6)'}}>{selectedStyle.name} &middot; {selectedMusic.name} &middot; {selectedBrandKit.name}{selectedVideoTemplate ? ` · ${selectedVideoTemplate.name}` : ''}</div>
                   </div>
                   {/* Music waveform bar */}
                   <div style={{position:'absolute',bottom:0,left:0,right:0,height:3,background:'var(--gradient-warm)',zIndex:3}}></div>
@@ -5160,6 +5200,52 @@ function CollageModeView() {
 
         {/* CONTROLS */}
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+          {/* VIDEO TEMPLATES — turnkey remix templates (CapCut-tier) */}
+          <div className="card">
+            <div className="card-head"><h3>Video Templates</h3><span style={{fontSize:'.7rem',color:'var(--text-dim)'}}>Pre-built scene structures</span></div>
+            <div style={{display:'grid',gap:'.4rem',maxHeight:240,overflowY:'auto'}}>
+              {VIDEO_TEMPLATES.map(t => (
+                <div key={t.id} onClick={() => applyVideoTemplate(t)} style={{padding:'.65rem .85rem',borderRadius:'var(--radius-lg)',border:selectedVideoTemplate?.id===t.id?'1px solid var(--yellow)':'1px solid var(--border)',cursor:'pointer',background:selectedVideoTemplate?.id===t.id?'rgba(255,214,10,0.06)':'var(--glass)',transition:'all .15s',display:'flex',gap:'.65rem',alignItems:'flex-start'}}>
+                  <span style={{fontSize:'1.2rem',lineHeight:1}}>{t.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:'.82rem'}}>{t.name}</div>
+                    <div style={{fontSize:'.7rem',color:'var(--text-dim)',lineHeight:1.3}}>{t.desc}</div>
+                    <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)',marginTop:'.2rem'}}>{t.durationSec}s &middot; {t.aspectRatio} &middot; {t.scenes.length} scenes</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* BRAND KIT — font + palette pairing (Simplicity-tier) */}
+          <div className="card">
+            <div className="card-head"><h3>Brand Kit</h3><span style={{fontSize:'.7rem',color:'var(--text-dim)'}}>Font + palette</span></div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'.4rem'}}>
+              {BRAND_KITS.map(k => (
+                <div key={k.id} onClick={() => setSelectedBrandKit(k)} style={{padding:'.6rem .75rem',borderRadius:'var(--radius-lg)',border:selectedBrandKit.id===k.id?'1px solid var(--yellow)':'1px solid var(--border)',cursor:'pointer',background:selectedBrandKit.id===k.id?'rgba(255,214,10,0.06)':'var(--glass)',transition:'all .15s'}}>
+                  <div style={{fontFamily:k.fonts.display,fontWeight:800,fontSize:'.95rem',marginBottom:'.15rem',letterSpacing:'-.01em'}}>{k.name}</div>
+                  <div style={{fontFamily:k.fonts.body,fontSize:'.66rem',color:'var(--text-dim)',marginBottom:'.4rem'}}>{k.vibe}</div>
+                  <div style={{display:'flex',gap:2,height:8,borderRadius:2,overflow:'hidden'}}>
+                    {k.palette.map((c,i) => <div key={i} style={{flex:1,background:c}} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* CAPTION STYLE — karaoke engine pairing */}
+          <div className="card">
+            <div className="card-head"><h3>Caption Style</h3><span style={{fontSize:'.7rem',color:'var(--text-dim)'}}>Karaoke + word-by-word</span></div>
+            <div style={{display:'grid',gap:'.4rem'}}>
+              {CAPTION_STYLES.map(c => (
+                <div key={c.id} onClick={() => setSelectedCaptionStyle(c)} style={{padding:'.5rem .7rem',borderRadius:'var(--radius-lg)',border:selectedCaptionStyle.id===c.id?'1px solid var(--yellow)':'1px solid var(--border)',cursor:'pointer',background:selectedCaptionStyle.id===c.id?'rgba(255,214,10,0.06)':'var(--glass)',transition:'all .15s',display:'flex',alignItems:'center',gap:'.6rem'}}>
+                  <div style={{...c.base,fontSize:'.95rem',lineHeight:1,flex:'0 0 auto'}}><span style={c.active}>Aa</span></div>
+                  <div style={{fontWeight:600,fontSize:'.8rem'}}>{c.name}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* STYLE */}
           <div className="card">
             <div className="card-head"><h3>Collage Style</h3></div>
@@ -8663,6 +8749,23 @@ const TEXT_PRESETS = [
   {id:'callout',     name:'Callout Bubble',  style:{fontFamily:'var(--display)',fontSize:'1.5rem',fontWeight:800,color:'#0A0A14',padding:'.6rem 1rem',background:'#FFD60A',borderRadius:'18px 18px 18px 4px'}, anim:'pop-in 0.3s'},
   {id:'big-emoji',   name:'Big Emoji',       style:{fontSize:'5rem'}, anim:'pop-in 0.4s cubic-bezier(.2,.9,.3,1.6)'},
   {id:'comment-overlay', name:'Comment Overlay', style:{fontFamily:'var(--body)',fontSize:'1.1rem',color:'#fff',padding:'.6rem .9rem',background:'rgba(0,0,0,0.7)',borderRadius:18,backdropFilter:'blur(6px)'}, anim:'slide-in-left 0.4s'},
+
+  // CAPCUT/SIMPLICITY-PARITY UPGRADE — 15 new presets
+  {id:'word-reveal',     name:'Word Reveal',      style:{fontFamily:'var(--display)',fontSize:'3rem',fontWeight:900,color:'#fff',letterSpacing:'-.02em'}, anim:'word-reveal 0.5s cubic-bezier(.2,.9,.3,1.4) both', perWord:true},
+  {id:'headline-3d',     name:'3D Headline',      style:{fontFamily:'var(--display)',fontSize:'4.2rem',fontWeight:900,color:'#fff',letterSpacing:'-.03em',transformOrigin:'center bottom'}, anim:'headline-3d 0.7s cubic-bezier(.2,.9,.3,1.2) both'},
+  {id:'marker-scribble', name:'Marker Highlight', style:{fontFamily:'var(--display)',fontSize:'2.6rem',fontWeight:800,color:'#0A0A14',background:'linear-gradient(180deg,transparent 60%,#FFD60A 60%)',padding:'0 .3rem'}, anim:'liquid-fill 0.8s ease-out both'},
+  {id:'mr-beast',        name:'MrBeast Bold',     style:{fontFamily:'var(--display)',fontSize:'3.8rem',fontWeight:900,color:'#FFD60A',WebkitTextStroke:'4px #000',textShadow:'6px 6px 0 #000, 0 0 24px rgba(0,0,0,.8)',letterSpacing:'-.02em'}, anim:'pop-in 0.4s cubic-bezier(.2,.9,.3,1.8)'},
+  {id:'neon-outline',    name:'Neon Outline',     style:{fontFamily:'var(--display)',fontSize:'3.4rem',fontWeight:900,color:'transparent',WebkitTextStroke:'2px #FF2D87',textShadow:'0 0 8px #FF2D87,0 0 24px #FF2D87'}, anim:'neon-flicker 2.4s ease-in-out infinite'},
+  {id:'chrome',          name:'Chrome Sheen',     style:{fontFamily:'var(--display)',fontSize:'3.6rem',fontWeight:900,background:'linear-gradient(110deg,#e0e0e0 0%,#fff 25%,#a8a8a8 50%,#fff 75%,#888 100%)',backgroundSize:'200% 100%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',letterSpacing:'-.03em'}, anim:'chrome-sheen 3s linear infinite'},
+  {id:'sticker-pop',     name:'Sticker Pop',      style:{fontFamily:'var(--display)',fontSize:'2.6rem',fontWeight:900,color:'#fff',WebkitTextStroke:'3px #000',textShadow:'4px 4px 0 #000, 8px 8px 0 #FFD60A',padding:'.4rem .8rem'}, anim:'pop-in 0.35s cubic-bezier(.2,.9,.3,1.8)'},
+  {id:'zoom-impact',     name:'Zoom Impact',      style:{fontFamily:'var(--display)',fontSize:'5rem',fontWeight:900,color:'#fff',letterSpacing:'-.05em',textShadow:'0 4px 24px rgba(0,0,0,.4)'}, anim:'zoom-impact 0.6s cubic-bezier(.2,.9,.3,1.4) both'},
+  {id:'wave-bounce',     name:'Wave Bounce',      style:{fontFamily:'var(--display)',fontSize:'2.8rem',fontWeight:900,color:'var(--cyan)'}, anim:'wave-bounce 1.2s ease-in-out infinite', perLetter:true},
+  {id:'stamp',           name:'Red Stamp',        style:{fontFamily:'var(--display)',fontSize:'2.8rem',fontWeight:900,color:'var(--red)',border:'5px double var(--red)',padding:'.4rem 1rem',borderRadius:8,letterSpacing:'.08em',textTransform:'uppercase',transform:'rotate(-8deg)'}, anim:'stamp-pop 0.5s cubic-bezier(.2,.9,.3,1.4) both'},
+  {id:'quote-mark',      name:'Editorial Quote',  style:{fontFamily:'var(--display)',fontSize:'2.4rem',fontStyle:'italic',color:'#fff',lineHeight:1.2,position:'relative',paddingLeft:'2.5rem',quotes:'"\u201C" "\u201D"'}, anim:'fade-up 0.8s ease-out', decorator:'quote'},
+  {id:'liquid-fill',     name:'Liquid Fill',      style:{fontFamily:'var(--display)',fontSize:'3.4rem',fontWeight:900,color:'#fff',background:'linear-gradient(0deg,var(--magenta) 0%,var(--magenta) 100%) no-repeat',backgroundSize:'100% 0%',backgroundPosition:'0 100%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}, anim:'liquid-fill 1.2s cubic-bezier(.2,.9,.3,1.2) both'},
+  {id:'glitch-zoom',     name:'Glitch Zoom',      style:{fontFamily:'var(--display)',fontSize:'3.6rem',fontWeight:900,color:'#fff',textShadow:'3px 0 var(--red),-3px 0 var(--cyan)'}, anim:'glitch-text 0.4s ease-in-out infinite, zoom-impact 0.6s cubic-bezier(.2,.9,.3,1.4) both'},
+  {id:'split-flap',      name:'Split Flap',       style:{fontFamily:'var(--mono)',fontSize:'3rem',fontWeight:700,color:'#FFD60A',background:'#0A0A14',padding:'.4rem .8rem',borderRadius:6,letterSpacing:'.1em',transformOrigin:'center'}, anim:'split-flap 0.5s cubic-bezier(.2,.9,.3,1.4) both'},
+  {id:'viral-yellow-box',name:'Viral Yellow Box', style:{fontFamily:'var(--display)',fontSize:'2.4rem',fontWeight:900,background:'#FFD60A',color:'#0A0A14',padding:'.35rem .8rem',borderRadius:4,transform:'rotate(-3deg)',boxShadow:'4px 4px 0 #000',letterSpacing:'-.01em'}, anim:'pop-in 0.3s cubic-bezier(.2,.9,.3,1.8)'},
 ];
 
 const OVERLAYS = [
@@ -8694,6 +8797,177 @@ const STYLE_PACKS = [
   {id:'asmr',           name:'ASMR / Process',     icon:'🌙', desc:'Slow dreamy crossfades, soft grade.',                transitions:['cross-dissolve','morph'],                       effect:'dreamy',     textPreset:'subtitle',      music:'acoustic'},
   {id:'pump-fitness',   name:'Pump / Fitness',     icon:'💪', desc:'Hard cuts, shake, neon energy.',                     transitions:['shake','zoom-punch','glitch'],                  effect:'neon',       textPreset:'caption-pop',   music:'electronic'},
 ];
+
+/* ============================================================
+   BRAND KITS — curated font + palette pairings (Simplicity-style).
+   Each kit can be applied to override the global --display/--body and
+   --brand-* CSS variables for in-app preview.
+   ============================================================ */
+const BRAND_KITS = [
+  {id:'bold-editorial', name:'Bold Editorial', vibe:'Magazine drama',
+    palette:['#0A0A0A','#E63946','#F5F1E8','#FFFFFF','#A8A8A8'],
+    fonts:{display:'Anton, Impact, sans-serif', body:'Inter, system-ui, sans-serif', mono:'JetBrains Mono, monospace'},
+    defaultTextPreset:'headline-3d', defaultEffect:'mono'},
+  {id:'clean-tech', name:'Clean Tech', vibe:'SaaS minimal',
+    palette:['#0F172A','#06B6D4','#FFFFFF','#E2E8F0','#3B82F6'],
+    fonts:{display:'Space Grotesk, sans-serif', body:'Inter, system-ui, sans-serif', mono:'JetBrains Mono, monospace'},
+    defaultTextPreset:'word-reveal', defaultEffect:'cool-blue'},
+  {id:'y2k-chrome', name:'Y2K Chrome', vibe:'Retro futurism',
+    palette:['#C0C0C0','#FF2D87','#3B82F6','#000000','#FFFFFF'],
+    fonts:{display:'VT323, monospace', body:'Major Mono Display, monospace', mono:'VT323, monospace'},
+    defaultTextPreset:'chrome', defaultEffect:'cyberpunk'},
+  {id:'wellness-soft', name:'Wellness Soft', vibe:'Calm botanical',
+    palette:['#7A9181','#F5E6E0','#FAF8F3','#A88B7F','#3D4A3F'],
+    fonts:{display:'Cormorant Garamond, serif', body:'Lora, Georgia, serif', mono:'JetBrains Mono, monospace'},
+    defaultTextPreset:'quote-mark', defaultEffect:'pastel'},
+  {id:'streetwear', name:'Streetwear', vibe:'Skate / drop',
+    palette:['#000000','#E63946','#FFFFFF','#FFD60A','#1A1A1A'],
+    fonts:{display:'Bebas Neue, Impact, sans-serif', body:'IBM Plex Mono, monospace', mono:'IBM Plex Mono, monospace'},
+    defaultTextPreset:'mr-beast', defaultEffect:'high-key'},
+  {id:'editorial-lux', name:'Editorial Lux', vibe:'Vogue / luxury',
+    palette:['#0A0A0A','#F5F1E8','#C9A96E','#8B7355','#FFFFFF'],
+    fonts:{display:'Playfair Display, Georgia, serif', body:'Manrope, sans-serif', mono:'JetBrains Mono, monospace'},
+    defaultTextPreset:'quote-mark', defaultEffect:'cinematic'},
+  {id:'mono-tech', name:'Mono Tech', vibe:'Terminal / dev',
+    palette:['#84CC16','#0A0A0A','#27272A','#A1A1AA','#FFFFFF'],
+    fonts:{display:'JetBrains Mono, monospace', body:'JetBrains Mono, monospace', mono:'JetBrains Mono, monospace'},
+    defaultTextPreset:'typewriter', defaultEffect:'low-key'},
+  {id:'sunset-vibes', name:'Sunset Vibes', vibe:'Coral + warmth',
+    palette:['#FF6B6B','#FF8E53','#A855F7','#FEF3C7','#0A0A14'],
+    fonts:{display:'Bricolage Grotesque, sans-serif', body:'DM Sans, sans-serif', mono:'JetBrains Mono, monospace'},
+    defaultTextPreset:'gradient', defaultEffect:'warm-gold'},
+];
+
+/* ============================================================
+   CAPTION STYLES — karaoke-engine compatible (per-word reveal + active-word highlight).
+   ============================================================ */
+const CAPTION_STYLES = [
+  {id:'tiktok-yellow-box', name:'TikTok Yellow Box',
+    base:{fontFamily:'var(--display)',fontSize:'2.2rem',fontWeight:900,color:'rgba(255,255,255,.55)',letterSpacing:'-.01em'},
+    active:{background:'#FFD60A',color:'#0A0A14',padding:'.2rem .5rem',borderRadius:4,transform:'rotate(-2deg)',boxShadow:'3px 3px 0 #000'},
+    entrance:'pop-in 0.25s cubic-bezier(.2,.9,.3,1.8)'},
+  {id:'beat-bounce', name:'Beat Bounce',
+    base:{fontFamily:'var(--display)',fontSize:'2.4rem',fontWeight:900,color:'#fff',textShadow:'2px 2px 0 #000'},
+    active:{color:'var(--yellow)',transform:'translateY(-6px) scale(1.1)',textShadow:'3px 3px 0 #000, 0 0 20px var(--yellow)'},
+    entrance:'wave-bounce 0.4s ease-out'},
+  {id:'neon-scribble', name:'Neon Scribble',
+    base:{fontFamily:'var(--display)',fontSize:'2.2rem',fontWeight:900,color:'transparent',WebkitTextStroke:'1.5px var(--magenta)'},
+    active:{color:'var(--magenta)',textShadow:'0 0 8px var(--magenta), 0 0 24px var(--magenta)'},
+    entrance:'fade-up 0.3s ease-out'},
+  {id:'mr-beast-caption', name:'MrBeast Caption',
+    base:{fontFamily:'var(--display)',fontSize:'2.6rem',fontWeight:900,color:'rgba(255,214,10,.45)',WebkitTextStroke:'2px #000',textShadow:'4px 4px 0 #000'},
+    active:{color:'#FFD60A',transform:'scale(1.08)',textShadow:'5px 5px 0 #000, 0 0 24px rgba(255,214,10,.6)'},
+    entrance:'pop-in 0.28s cubic-bezier(.2,.9,.3,1.8)'},
+];
+
+/* ============================================================
+   VIDEO TEMPLATES — turnkey multi-scene remix templates (CapCut marketplace tier).
+   Each defines target duration, scene-by-scene timing, suggested presets per scene.
+   ============================================================ */
+const VIDEO_TEMPLATES = [
+  {id:'hook-payoff-15s', name:'Hook → Payoff', icon:'🪝', durationSec:15, aspectRatio:'9:16',
+    desc:'3-second hook, 9-second body, 3-second payoff. Beat-cut pacing.',
+    musicMood:'hip-hop', defaultBrandKit:'streetwear', defaultStylePack:'tiktok-pop',
+    scenes:[
+      {beatSec:0,  durationSec:3, captionSlot:'BIG HOOK QUESTION', suggestedTextPreset:'mr-beast',          transition:'zoom-punch'},
+      {beatSec:3,  durationSec:9, captionSlot:'KEY POINTS',         suggestedTextPreset:'word-reveal',       transition:'whip-pan-left'},
+      {beatSec:12, durationSec:3, captionSlot:'PAYOFF + CTA',       suggestedTextPreset:'viral-yellow-box', transition:'shake'},
+    ]},
+  {id:'3-shot-reel-30s', name:'3-Shot Reel', icon:'🎞️', durationSec:30, aspectRatio:'9:16',
+    desc:'3 hero shots with slow-build pacing. Great for product reveals.',
+    musicMood:'cinematic', defaultBrandKit:'editorial-lux', defaultStylePack:'cinematic-vlog',
+    scenes:[
+      {beatSec:0,  durationSec:10, captionSlot:'SETUP',  suggestedTextPreset:'big-quote',  transition:'cross-dissolve'},
+      {beatSec:10, durationSec:10, captionSlot:'BUILD',  suggestedTextPreset:'headline-3d', transition:'light-leak'},
+      {beatSec:20, durationSec:10, captionSlot:'REVEAL', suggestedTextPreset:'zoom-impact', transition:'lens-flare'},
+    ]},
+  {id:'before-after-15s', name:'Before & After', icon:'↔️', durationSec:15, aspectRatio:'9:16',
+    desc:'Split-reveal transformation. Perfect for fitness, design, beauty.',
+    musicMood:'electronic', defaultBrandKit:'clean-tech', defaultStylePack:'product-demo',
+    scenes:[
+      {beatSec:0, durationSec:7,  captionSlot:'BEFORE', suggestedTextPreset:'sticker-pop', transition:'slice-vertical'},
+      {beatSec:7, durationSec:8,  captionSlot:'AFTER',  suggestedTextPreset:'liquid-fill', transition:'fade-white'},
+    ]},
+  {id:'quote-graphic-10s', name:'Quote Graphic', icon:'💬', durationSec:10, aspectRatio:'1:1',
+    desc:'Static background + kinetic typography. Instagram-feed friendly.',
+    musicMood:'acoustic', defaultBrandKit:'editorial-lux', defaultStylePack:'cinematic-vlog',
+    scenes:[
+      {beatSec:0, durationSec:10, captionSlot:'QUOTE TEXT', suggestedTextPreset:'quote-mark', transition:'fade'},
+    ]},
+  {id:'podcast-clip-30s', name:'Podcast Clip', icon:'🎙️', durationSec:30, aspectRatio:'9:16',
+    desc:'Talking head + karaoke captions + name lower-third.',
+    musicMood:'corporate', defaultBrandKit:'clean-tech', defaultStylePack:'podcast-reel',
+    scenes:[
+      {beatSec:0, durationSec:30, captionSlot:'KARAOKE TRANSCRIPT', suggestedTextPreset:'karaoke', transition:'cross-dissolve', captionStyle:'tiktok-yellow-box'},
+    ]},
+  {id:'product-launch-20s', name:'Product Launch', icon:'🚀', durationSec:20, aspectRatio:'9:16',
+    desc:'5 scenes: tease, feature, feature, callout, CTA.',
+    musicMood:'electronic', defaultBrandKit:'bold-editorial', defaultStylePack:'product-demo',
+    scenes:[
+      {beatSec:0,  durationSec:3, captionSlot:'TEASE',     suggestedTextPreset:'glitch-zoom',   transition:'glitch'},
+      {beatSec:3,  durationSec:5, captionSlot:'FEATURE 1', suggestedTextPreset:'callout',       transition:'zoom-punch'},
+      {beatSec:8,  durationSec:5, captionSlot:'FEATURE 2', suggestedTextPreset:'callout',       transition:'slice-vertical'},
+      {beatSec:13, durationSec:4, captionSlot:'PRICE',     suggestedTextPreset:'zoom-impact',   transition:'pop-in'},
+      {beatSec:17, durationSec:3, captionSlot:'CTA / URL', suggestedTextPreset:'viral-yellow-box', transition:'shake'},
+    ]},
+  {id:'b-roll-narrative-45s', name:'B-Roll Narrative', icon:'🎥', durationSec:45, aspectRatio:'16:9',
+    desc:'6 cuts pacing voiceover. Documentary feel.',
+    musicMood:'cinematic', defaultBrandKit:'editorial-lux', defaultStylePack:'cinematic-vlog',
+    scenes:[
+      {beatSec:0,  durationSec:8, captionSlot:'OPENING LINE',  suggestedTextPreset:'fade',          transition:'cross-dissolve'},
+      {beatSec:8,  durationSec:7, captionSlot:'CONTEXT',       suggestedTextPreset:'subtitle',      transition:'cross-dissolve'},
+      {beatSec:15, durationSec:8, captionSlot:'CONFLICT',      suggestedTextPreset:'big-quote',     transition:'light-leak'},
+      {beatSec:23, durationSec:8, captionSlot:'TURNING POINT', suggestedTextPreset:'headline-3d',   transition:'lens-flare'},
+      {beatSec:31, durationSec:7, captionSlot:'RESOLUTION',    suggestedTextPreset:'word-reveal',   transition:'fade'},
+      {beatSec:38, durationSec:7, captionSlot:'TAGLINE / CTA', suggestedTextPreset:'quote-mark',    transition:'fade-white'},
+    ]},
+  {id:'day-in-life-60s', name:'Day in the Life', icon:'☀️', durationSec:60, aspectRatio:'9:16',
+    desc:'8 timestamped clips. Casual lifestyle vlog format.',
+    musicMood:'hip-hop', defaultBrandKit:'sunset-vibes', defaultStylePack:'instagram-reel',
+    scenes:[
+      {beatSec:0,  durationSec:7, captionSlot:'06:00 ☕', suggestedTextPreset:'split-flap',       transition:'fade'},
+      {beatSec:7,  durationSec:7, captionSlot:'08:00 🚇', suggestedTextPreset:'split-flap',       transition:'whip-pan-left'},
+      {beatSec:14, durationSec:8, captionSlot:'10:00 💻', suggestedTextPreset:'split-flap',       transition:'cross-dissolve'},
+      {beatSec:22, durationSec:7, captionSlot:'13:00 🥗', suggestedTextPreset:'split-flap',       transition:'zoom-punch'},
+      {beatSec:29, durationSec:8, captionSlot:'15:00 📞', suggestedTextPreset:'split-flap',       transition:'whip-pan-right'},
+      {beatSec:37, durationSec:7, captionSlot:'18:00 🏋️', suggestedTextPreset:'split-flap',       transition:'shake'},
+      {beatSec:44, durationSec:8, captionSlot:'20:00 🍷', suggestedTextPreset:'split-flap',       transition:'cross-dissolve'},
+      {beatSec:52, durationSec:8, captionSlot:'22:00 📚', suggestedTextPreset:'split-flap',       transition:'fade'},
+    ]},
+];
+
+/* ============================================================
+   KaraokeRenderer — animates words one-by-one based on a wordTimings array.
+   Falls back to even spacing if timings missing. Used by the preview canvas
+   when CollageModeView has captionsOn AND a transcript is available.
+   ============================================================ */
+function KaraokeRenderer({text, wordTimings, currentTime, captionStyleId}){
+  const style = React.useMemo(() => CAPTION_STYLES.find(c => c.id === captionStyleId) || CAPTION_STYLES[0], [captionStyleId]);
+  const words = React.useMemo(() => {
+    if (Array.isArray(wordTimings) && wordTimings.length) return wordTimings;
+    const tokens = (text||'').split(/\s+/).filter(Boolean);
+    const totalDuration = 6;
+    const per = totalDuration / Math.max(tokens.length, 1);
+    return tokens.map((w, i) => ({word:w, startSec:i*per, endSec:(i+1)*per}));
+  }, [text, wordTimings]);
+  return (
+    <div style={{...style.base, display:'flex', flexWrap:'wrap', gap:'.4em', justifyContent:'center', textAlign:'center'}}>
+      {words.map((w, i) => {
+        const isPast = currentTime > w.endSec;
+        const isActive = currentTime >= w.startSec && currentTime <= w.endSec;
+        const isFuture = currentTime < w.startSec;
+        const inlineStyle = {
+          display:'inline-block',
+          transition:'all .15s ease-out',
+          animation: isActive ? style.entrance : undefined,
+          opacity: isFuture ? 0 : (isPast ? 0.55 : 1),
+          ...(isActive ? style.active : {}),
+        };
+        return <span key={i} style={inlineStyle}>{w.word}</span>;
+      })}
+    </div>
+  );
+}
 
 /* ============================================================
    CALENDAR — host appointment scheduling natively (replaces Calendly + GHL).
