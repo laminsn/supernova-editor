@@ -1793,6 +1793,22 @@ function LandingPage() {
         </div>
       </section>
 
+      <section className="sec" style={{background:'var(--bg-solid)',borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)'}}>
+        <div className="wrap" style={{maxWidth:640}}>
+          <div className="sec-head" style={{textAlign:'center',marginBottom:'2rem'}}>
+            <div className="eyebrow">Newsletter</div>
+            <h2>Stay in the loop.</h2>
+            <p>One email a week. Strategy, frameworks, and case studies. No fluff.</p>
+          </div>
+          <NewsletterSignupForm
+            listSlug="main"
+            heading="Join 5,000+ creators"
+            subheading="Get our weekly content-system breakdown straight to your inbox."
+            cta="Subscribe Free"
+          />
+        </div>
+      </section>
+
       <section className="final-cta">
         <h2>Start Creating.<br/>Stop Guessing.</h2>
         <p>One topic becomes 12 distinct asset types: Reel, Carousel, Long-Form, <strong>SEO Blog</strong>, Thumbnails, Email, Lead Magnet, Brain Score, Workflows, Vault, Collab Packages, Comment Monitor. Brain-scored. Teleprompter-recorded. Auto-deployed across IG, TikTok, YouTube, LinkedIn, Facebook, WordPress, Ghost, and Email. Powered by Claude AI.</p>
@@ -1859,6 +1875,7 @@ function Sidebar() {
     {key:'comments',label:'Comment Monitor',icon:Icons.bell,badge:'NEW'},
     {key:'email',label:'Email Studio',icon:Icons.mail},
     {key:'campaigns',label:'Email Campaigns',icon:Icons.send,badge:'NEW'},
+    {key:'calendars',label:'Calendar',icon:Icons.calendar,badge:'NEW'},
     {key:'settings',label:'Settings',icon:Icons.gear},
     {key:'legal',label:'Terms & Privacy',icon:Icons.shield},
   ];
@@ -1957,7 +1974,7 @@ function SidebarUserChip() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',campaigns:'Email Campaigns',pricing:'Pricing',legal:'Terms & Privacy',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',campaigns:'Email Campaigns',calendars:'Calendar',pricing:'Pricing',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -8345,15 +8362,21 @@ function SalesContactForm({plan, onClose, onCustomerSubmitted}) {
       )}
 
       {step === 'scheduler' && (
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          {/* Calendly inline widget. Auto-loads via their widget script. */}
-          <iframe
-            src={calendlyUrl + '?hide_event_type_details=1&hide_gdpr_banner=1&primary_color=FFD60A&text_color=F5F5F0&background_color=0C0C12&email=' + encodeURIComponent(form.email) + '&name=' + encodeURIComponent(form.name)}
-            style={{width:'100%',height:'780px',border:'none',background:'#0C0C12'}}
-            title="Schedule discovery call"
-          />
-          <div style={{padding:'1rem',background:'var(--glass)',borderTop:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <div style={{fontSize:'.78rem',color:'var(--text-muted)'}}>After booking, you'll get a calendar invite + Zoom link.</div>
+        <div>
+          {/* Native calendar — no Calendly. Falls back to a contact note when no
+              sales calendar slug is configured. */}
+          {(typeof window !== 'undefined' && window.SUPERNOVA_SALES_CALENDAR_SLUG) ? (
+            <CalendarBookingView slug={window.SUPERNOVA_SALES_CALENDAR_SLUG}/>
+          ) : (
+            <div className="card" style={{padding:'2rem',textAlign:'center'}}>
+              <div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>📨</div>
+              <h3>Got it — we'll be in touch</h3>
+              <p style={{color:'var(--text-muted)',marginBottom:'1.25rem'}}>A branch manager will reach out to <strong>{form.email}</strong> within 1 business day to schedule the discovery call.</p>
+              <p style={{fontSize:'.78rem',color:'var(--text-dim)',fontFamily:'var(--mono)',marginBottom:'1.25rem'}}>(Set <code>window.SUPERNOVA_SALES_CALENDAR_SLUG</code> at build time to enable inline booking here using the Calendar view.)</p>
+              <button className="btn btn-primary" onClick={onCustomerSubmitted}>Continue → Dashboard</button>
+            </div>
+          )}
+          <div style={{textAlign:'center',marginTop:'1rem'}}>
             <button className="btn btn-ghost btn-sm" onClick={onCustomerSubmitted}>Skip for now → Dashboard</button>
           </div>
         </div>
@@ -8667,6 +8690,544 @@ const STYLE_PACKS = [
   {id:'asmr',           name:'ASMR / Process',     icon:'🌙', desc:'Slow dreamy crossfades, soft grade.',                transitions:['cross-dissolve','morph'],                       effect:'dreamy',     textPreset:'subtitle',      music:'acoustic'},
   {id:'pump-fitness',   name:'Pump / Fitness',     icon:'💪', desc:'Hard cuts, shake, neon energy.',                     transitions:['shake','zoom-punch','glitch'],                  effect:'neon',       textPreset:'caption-pop',   music:'electronic'},
 ];
+
+/* ============================================================
+   CALENDAR — host appointment scheduling natively (replaces Calendly + GHL).
+   - CalendarSettingsView: list/create/edit calendars, weekly availability,
+     copy public booking link.
+   - CalendarBookingView: public page rendered when ?book=<slug> URL param
+     is present. Date grid + time slots + booking form.
+   - NewsletterSignupForm: drop-in email opt-in widget. Used inline on landing
+     and as standalone embeddable iframe (later).
+   ============================================================ */
+
+const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function CalendarSettingsView() {
+  const {addToast, currentUser, currentProfile} = useApp();
+  const [calendars, setCalendars] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const sb = window.SupabaseClient;
+  const sbReady = sb && sb.isReady();
+
+  const load = useCallback(async () => {
+    if (!sbReady || !currentUser?.id) { setLoading(false); return; }
+    const rows = await sb.fetch('calendars', {eq:{user_id: currentUser.id}, order:'created_at', ascending:false});
+    setCalendars(rows || []);
+    setLoading(false);
+  }, [sbReady, currentUser?.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const newCalendar = () => {
+    setEditing({
+      name: 'Discovery Call',
+      slug: ((currentProfile?.referral_slug || 'me') + '-discovery'),
+      description: '30-minute discovery call. Pick whatever works.',
+      duration_minutes: 30,
+      buffer_after_minutes: 15,
+      buffer_before_minutes: 0,
+      min_notice_hours: 4,
+      max_advance_days: 30,
+      timezone: currentProfile?.timezone || 'America/New_York',
+      meeting_provider: 'manual',
+      meeting_link: '',
+      ask_for_phone: false,
+      enabled: true,
+      _availability: defaultAvailability(),
+      _isNew: true,
+    });
+  };
+
+  const saveCalendar = async (cal) => {
+    if (!sbReady) { addToast('Connect Supabase first','error'); return; }
+    const wsId = sb.getWorkspaceId();
+    const {_availability, _isNew, _id, ...row} = cal;
+    if (currentUser?.id) row.user_id = currentUser.id;
+    if (wsId) row.workspace_id = wsId;
+    let savedId = cal.id;
+    if (cal.id) {
+      await sb.update('calendars', cal.id, row);
+    } else {
+      const inserted = await sb.insert('calendars', row);
+      if (!inserted?.[0]) { addToast('Save failed','error'); return; }
+      savedId = inserted[0].id;
+    }
+    // Sync availability rules: nuke + re-insert
+    if (cal.id) {
+      await sb.getClient().from('calendar_availability').delete().eq('calendar_id', cal.id);
+    }
+    if (_availability && _availability.length) {
+      await sb.getClient().from('calendar_availability').insert(_availability.map(a => ({...a, calendar_id: savedId})));
+    }
+    addToast('Calendar saved','success');
+    setEditing(null);
+    load();
+  };
+
+  const deleteCalendar = async (id) => {
+    if (!confirm('Delete this calendar? All bookings stay in the database but the public link breaks.')) return;
+    await sb.delete('calendars', id);
+    addToast('Calendar deleted','info');
+    load();
+  };
+
+  const copyLink = (slug) => {
+    navigator.clipboard.writeText(`${window.location.origin}/?book=${slug}`);
+    addToast('Booking link copied', 'success');
+  };
+
+  if (editing) return <CalendarEditor cal={editing} onSave={saveCalendar} onCancel={() => setEditing(null)}/>;
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <h1>Calendar</h1>
+          <div className="sub">Self-hosted appointment scheduling. Replaces Calendly + GHL. Each calendar has a public booking link you can share anywhere.</div>
+        </div>
+        <button className="btn btn-primary" onClick={newCalendar}>+ New Calendar</button>
+      </div>
+
+      {!currentUser && (
+        <div className="card" style={{padding:'2rem',textAlign:'center'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📅</div>
+          <div style={{fontWeight:700}}>Sign in to manage calendars</div>
+        </div>
+      )}
+
+      {loading && currentUser && <div className="card" style={{padding:'2rem',textAlign:'center',color:'var(--text-dim)'}}>Loading…</div>}
+
+      {!loading && currentUser && calendars.length === 0 && (
+        <div className="card" style={{padding:'2.5rem',textAlign:'center'}}>
+          <div style={{fontSize:'2.5rem',marginBottom:'.75rem'}}>📅</div>
+          <h3 style={{margin:'0 0 .5rem'}}>No calendars yet</h3>
+          <p style={{color:'var(--text-muted)',marginBottom:'1.25rem'}}>Create your first one — typically a 15 / 30 / 60 minute discovery call.</p>
+          <button className="btn btn-primary" onClick={newCalendar}>+ Create First Calendar</button>
+        </div>
+      )}
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))',gap:'.85rem'}}>
+        {calendars.map(c => (
+          <div key={c.id} className="card" style={{padding:'1.1rem',borderLeft:`4px solid ${c.color || 'var(--yellow)'}`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.4rem'}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:800,fontSize:'1rem',marginBottom:2}}>{c.name}</div>
+                <div style={{fontSize:'.72rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>/?book={c.slug}</div>
+              </div>
+              <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background: c.enabled ? 'rgba(0,230,138,0.15)':'var(--glass)',color: c.enabled ? 'var(--green)':'var(--text-dim)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>{c.enabled ? 'Live' : 'Off'}</span>
+            </div>
+            {c.description && <div style={{fontSize:'.78rem',color:'var(--text-muted)',marginBottom:'.75rem',lineHeight:1.5}}>{c.description}</div>}
+            <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap',marginBottom:'.75rem'}}>
+              <span style={{fontSize:'.62rem',padding:'.15rem .4rem',background:'var(--glass)',borderRadius:4,fontFamily:'var(--mono)'}}>{c.duration_minutes}m</span>
+              <span style={{fontSize:'.62rem',padding:'.15rem .4rem',background:'var(--glass)',borderRadius:4,fontFamily:'var(--mono)'}}>{c.timezone}</span>
+              <span style={{fontSize:'.62rem',padding:'.15rem .4rem',background:'var(--glass)',borderRadius:4,fontFamily:'var(--mono)'}}>{c.buffer_after_minutes}m buffer</span>
+            </div>
+            <div style={{display:'flex',gap:'.4rem'}}>
+              <button className="btn btn-ghost btn-sm" onClick={() => copyLink(c.slug)} style={{flex:1}}>🔗 Copy Link</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => window.open(`/?book=${c.slug}`, '_blank')}>👁️ Open</button>
+              <button className="btn btn-ghost btn-sm" onClick={async () => {
+                const avail = await sb.fetch('calendar_availability', {eq:{calendar_id: c.id}});
+                setEditing({...c, _availability: avail || []});
+              }}>Edit</button>
+              <button className="btn btn-ghost btn-sm" style={{color:'var(--red)'}} onClick={() => deleteCalendar(c.id)}>×</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CalendarEditor({cal, onSave, onCancel}) {
+  const {addToast} = useApp();
+  const [form, setForm] = useState(cal);
+  const u = (k,v) => setForm(p => ({...p,[k]:v}));
+  const upAvail = (idx, k, v) => {
+    const next = [...(form._availability || [])];
+    next[idx] = {...next[idx], [k]: v};
+    setForm(p => ({...p, _availability: next}));
+  };
+  const addSlot = (day) => {
+    setForm(p => ({...p, _availability: [...(p._availability || []), {day_of_week: day, start_time: '09:00', end_time: '17:00'}]}));
+  };
+  const removeSlot = (idx) => {
+    setForm(p => ({...p, _availability: (p._availability || []).filter((_,i) => i !== idx)}));
+  };
+
+  return (
+    <div className="view-enter">
+      <div className="view-head">
+        <div>
+          <button className="btn btn-ghost btn-sm" onClick={onCancel} style={{marginBottom:'.4rem'}}>← Back</button>
+          <h1>{form._isNew ? 'New' : 'Edit'} Calendar</h1>
+        </div>
+        <button className="btn btn-primary" onClick={() => {
+          if (!form.name || !form.slug) { addToast('Name and slug required','error'); return; }
+          if (!/^[a-z0-9-]+$/.test(form.slug)) { addToast('Slug = lowercase letters, numbers, dashes only','error'); return; }
+          onSave(form);
+        }}>Save</button>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
+        <div className="card">
+          <div className="card-head"><h3>Details</h3></div>
+          <label className="field"><span className="lbl">Name *</span><input className="input" value={form.name} onChange={e => u('name', e.target.value)}/></label>
+          <label className="field"><span className="lbl">Public slug *</span>
+            <div style={{display:'flex',alignItems:'center',gap:'.4rem'}}>
+              <span style={{fontFamily:'var(--mono)',fontSize:'.78rem',color:'var(--text-dim)'}}>/?book=</span>
+              <input className="input" value={form.slug} onChange={e => u('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,'-'))}/>
+            </div>
+          </label>
+          <label className="field"><span className="lbl">Description</span><textarea className="input" rows={2} value={form.description || ''} onChange={e => u('description', e.target.value)} style={{fontFamily:'var(--body)'}}/></label>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.5rem'}}>
+            <label className="field"><span className="lbl">Duration</span>
+              <select className="input" value={form.duration_minutes} onChange={e => u('duration_minutes', parseInt(e.target.value))}>
+                {[15,20,30,45,60,90,120].map(m => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+            <label className="field"><span className="lbl">Buffer after</span>
+              <select className="input" value={form.buffer_after_minutes} onChange={e => u('buffer_after_minutes', parseInt(e.target.value))}>
+                {[0,5,10,15,30].map(m => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+            <label className="field"><span className="lbl">Min notice</span>
+              <select className="input" value={form.min_notice_hours} onChange={e => u('min_notice_hours', parseInt(e.target.value))}>
+                {[1,2,4,12,24,48].map(h => <option key={h} value={h}>{h} hr</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="field"><span className="lbl">Timezone</span>
+            <select className="input" value={form.timezone} onChange={e => u('timezone', e.target.value)}>
+              {['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Sao_Paulo','Europe/London','Europe/Paris','Europe/Berlin','Asia/Dubai','Asia/Shanghai','Asia/Tokyo','Australia/Sydney'].map(tz => <option key={tz} value={tz}>{tz.replace('_',' ')}</option>)}
+            </select>
+          </label>
+          <label className="field"><span className="lbl">Meeting link (Zoom/Meet)</span>
+            <input className="input" placeholder="https://zoom.us/my/..." value={form.meeting_link || ''} onChange={e => u('meeting_link', e.target.value)}/>
+          </label>
+          <label style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.6rem 0'}}>
+            <input type="checkbox" checked={!!form.ask_for_phone} onChange={e => u('ask_for_phone', e.target.checked)} style={{accentColor:'var(--yellow)'}}/>
+            <span style={{fontSize:'.85rem'}}>Ask for phone number on booking</span>
+          </label>
+          <label style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+            <input type="checkbox" checked={form.enabled !== false} onChange={e => u('enabled', e.target.checked)} style={{accentColor:'var(--yellow)'}}/>
+            <span style={{fontSize:'.85rem'}}>Enabled (public link works)</span>
+          </label>
+        </div>
+
+        <div className="card">
+          <div className="card-head"><h3>Weekly Availability</h3></div>
+          <div style={{fontSize:'.78rem',color:'var(--text-muted)',marginBottom:'.75rem'}}>Times in <strong>{form.timezone}</strong>. Add multiple windows per day for split shifts.</div>
+          {DAY_NAMES.map((dayName, dayIdx) => {
+            const slots = (form._availability || []).map((a,i) => ({...a, _idx:i})).filter(a => a.day_of_week === dayIdx);
+            return (
+              <div key={dayIdx} style={{padding:'.5rem 0',borderBottom:'1px solid var(--border)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.35rem'}}>
+                  <strong style={{fontSize:'.85rem',width:50}}>{dayName}</strong>
+                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.15rem .4rem'}} onClick={() => addSlot(dayIdx)}>+ Add</button>
+                </div>
+                {slots.length === 0 ? (
+                  <div style={{fontSize:'.7rem',color:'var(--text-dim)',paddingLeft:'1rem'}}>Unavailable</div>
+                ) : slots.map(slot => (
+                  <div key={slot._idx} style={{display:'flex',gap:'.35rem',alignItems:'center',marginBottom:'.3rem',paddingLeft:'1rem'}}>
+                    <input type="time" className="input" style={{maxWidth:120,padding:'.3rem .5rem',fontSize:'.78rem'}} value={slot.start_time} onChange={e => upAvail(slot._idx, 'start_time', e.target.value)}/>
+                    <span style={{fontSize:'.7rem',color:'var(--text-dim)'}}>—</span>
+                    <input type="time" className="input" style={{maxWidth:120,padding:'.3rem .5rem',fontSize:'.78rem'}} value={slot.end_time} onChange={e => upAvail(slot._idx, 'end_time', e.target.value)}/>
+                    <button className="btn btn-ghost btn-sm" style={{padding:'.15rem .4rem',color:'var(--red)'}} onClick={() => removeSlot(slot._idx)}>×</button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function defaultAvailability() {
+  // Mon–Fri 9–5 by default
+  return [1,2,3,4,5].map(d => ({day_of_week: d, start_time:'09:00', end_time:'17:00'}));
+}
+
+/* ============================================================
+   CALENDAR BOOKING VIEW — public, mounted when ?book=<slug>
+   ============================================================ */
+function CalendarBookingView({slug}) {
+  const [calendar, setCalendar] = useState(null);
+  const [slots, setSlots] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedTime, setSelectedTime] = useState(null);
+  const [step, setStep] = useState('pick'); // pick | form | done
+  const [form, setForm] = useState({name:'', email:'', phone:'', notes:''});
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmed, setConfirmed] = useState(null);
+
+  useEffect(() => {
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+    if (!sbUrl || !sbKey) { setError('Booking page not configured (Supabase not connected).'); setLoading(false); return; }
+    fetch('/api/calendar-availability', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({slug, supabase_url: sbUrl, supabase_key: sbKey}),
+    }).then(r => r.json()).then(data => {
+      if (!data.ok) { setError(data.error || 'Failed to load'); }
+      else { setCalendar(data.calendar); setSlots(data.slots); if (data.slots.length) setSelectedDate(data.slots[0].date); }
+      setLoading(false);
+    }).catch(e => { setError(e.message); setLoading(false); });
+  }, [slug]);
+
+  const submit = async () => {
+    if (!form.name || !form.email || !selectedDate || !selectedTime) return;
+    setSubmitting(true);
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+    // Build ISO string in calendar's timezone, then submit
+    const [hh, mm] = selectedTime.split(':').map(Number);
+    const startsLocal = `${selectedDate}T${selectedTime}:00`;
+    // Use the same offset trick as availability: send a wall-clock + timezone
+    const r = await fetch('/api/calendar-book', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        slug, starts_at_iso: tzWallClockToIso(selectedDate, selectedTime, calendar.timezone),
+        attendee_name: form.name, attendee_email: form.email,
+        attendee_phone: form.phone || null,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        notes: form.notes || null,
+        supabase_url: sbUrl, supabase_key: sbKey,
+      })
+    });
+    const data = await r.json();
+    setSubmitting(false);
+    if (!r.ok || !data.ok) { setError(data.error || 'Booking failed'); return; }
+    setConfirmed(data);
+    setStep('done');
+  };
+
+  if (loading) return <BookingShell><div style={{padding:'3rem',textAlign:'center',color:'var(--text-dim)'}}>Loading…</div></BookingShell>;
+  if (error && !calendar) return <BookingShell><div className="card" style={{padding:'2rem',textAlign:'center'}}><div style={{fontSize:'2rem'}}>⚠️</div><h3>Couldn't load this calendar</h3><p style={{color:'var(--text-muted)'}}>{error}</p></div></BookingShell>;
+
+  if (step === 'done' && confirmed) {
+    return (
+      <BookingShell>
+        <div className="card" style={{padding:'2.5rem',textAlign:'center'}}>
+          <div style={{fontSize:'3rem',marginBottom:'.75rem'}}>✅</div>
+          <h2>You're booked.</h2>
+          <p style={{color:'var(--text-muted)',marginBottom:'1.25rem'}}>{calendar.name} on <strong style={{color:'var(--text)'}}>{new Date(confirmed.booking.starts_at).toLocaleString()}</strong>. Check your inbox for the calendar invite.</p>
+          {confirmed.booking.meeting_link && <p>Meeting link: <a href={confirmed.booking.meeting_link} style={{color:'var(--yellow)'}}>{confirmed.booking.meeting_link}</a></p>}
+          <div style={{display:'flex',gap:'.5rem',justifyContent:'center',marginTop:'1.5rem'}}>
+            <a href={confirmed.cancellation_url} className="btn btn-ghost btn-sm">Cancel</a>
+            <a href={confirmed.reschedule_url} className="btn btn-ghost btn-sm">Reschedule</a>
+          </div>
+        </div>
+      </BookingShell>
+    );
+  }
+
+  return (
+    <BookingShell>
+      <div className="card" style={{padding:'2rem',marginBottom:'1rem'}}>
+        <h1 style={{margin:'0 0 .25rem',fontSize:'1.6rem'}}>{calendar.name}</h1>
+        <div style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:'.5rem'}}>{calendar.duration_minutes} min · {calendar.timezone}</div>
+        {calendar.description && <p style={{margin:0,color:'var(--text-muted)'}}>{calendar.description}</p>}
+      </div>
+
+      {step === 'pick' && (
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem'}}>
+          <div className="card">
+            <div className="card-head"><h3>Pick a date</h3></div>
+            <div style={{display:'flex',flexDirection:'column',gap:'.3rem',maxHeight:480,overflowY:'auto'}}>
+              {slots.map(s => {
+                const d = new Date(s.date + 'T12:00:00Z');
+                const fmt = d.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+                return (
+                  <button key={s.date} onClick={() => {setSelectedDate(s.date); setSelectedTime(null);}}
+                    style={{padding:'.6rem .85rem',background: selectedDate === s.date ? 'var(--yellow)' : 'var(--glass)',color: selectedDate === s.date ? '#0A0A14' : 'var(--text)',border:'1px solid '+(selectedDate === s.date ? 'var(--yellow)' : 'var(--border)'),borderRadius:8,fontSize:'.85rem',cursor:'pointer',textAlign:'left',display:'flex',justifyContent:'space-between'}}>
+                    <span>{fmt}</span>
+                    <span style={{fontSize:'.7rem',opacity:.7}}>{s.times.length} slot{s.times.length===1?'':'s'}</span>
+                  </button>
+                );
+              })}
+              {slots.length === 0 && <div style={{padding:'1rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.85rem'}}>No availability in the next {calendar.max_advance_days || 30} days.</div>}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>Pick a time</h3></div>
+            {selectedDate && (
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.4rem',maxHeight:480,overflowY:'auto'}}>
+                {slots.find(s => s.date === selectedDate)?.times.map(t => (
+                  <button key={t} onClick={() => {setSelectedTime(t); setStep('form');}}
+                    style={{padding:'.6rem',background: selectedTime === t ? 'var(--yellow)' : 'var(--glass)',color: selectedTime === t ? '#0A0A14' : 'var(--text)',border:'1px solid '+(selectedTime === t ? 'var(--yellow)' : 'var(--border)'),borderRadius:8,fontSize:'.88rem',fontWeight:600,cursor:'pointer'}}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {step === 'form' && (
+        <div className="card" style={{padding:'1.5rem'}}>
+          <button className="btn btn-ghost btn-sm" onClick={() => {setStep('pick'); setSelectedTime(null);}} style={{marginBottom:'.75rem'}}>← Pick different time</button>
+          <h3 style={{margin:'0 0 .25rem'}}>Confirm details</h3>
+          <div style={{fontSize:'.82rem',color:'var(--text-muted)',marginBottom:'1rem'}}>{calendar.name} · {selectedDate} at {selectedTime} ({calendar.timezone})</div>
+          <label className="field"><span className="lbl">Name *</span><input className="input" value={form.name} onChange={e => setForm({...form, name:e.target.value})} required/></label>
+          <label className="field"><span className="lbl">Email *</span><input className="input" type="email" value={form.email} onChange={e => setForm({...form, email:e.target.value})} required/></label>
+          {calendar.ask_for_phone && <label className="field"><span className="lbl">Phone</span><input className="input" type="tel" value={form.phone} onChange={e => setForm({...form, phone:e.target.value})}/></label>}
+          <label className="field"><span className="lbl">Anything we should know?</span><textarea className="input" rows={3} value={form.notes} onChange={e => setForm({...form, notes:e.target.value})}/></label>
+          {error && <div style={{padding:'.6rem',background:'rgba(255,80,80,0.1)',color:'var(--red)',borderRadius:6,marginBottom:'.75rem',fontSize:'.82rem'}}>{error}</div>}
+          <button className="btn btn-primary" disabled={submitting || !form.name || !form.email} onClick={submit} style={{width:'100%'}}>{submitting ? '⚡ Booking…' : 'Confirm Booking'}</button>
+        </div>
+      )}
+    </BookingShell>
+  );
+}
+
+function BookingShell({children}) {
+  return (
+    <div style={{minHeight:'100vh',background:'var(--bg)',padding:'2rem 1rem'}}>
+      <div style={{maxWidth:780,margin:'0 auto'}}>
+        <div style={{textAlign:'center',marginBottom:'1.5rem'}}>
+          <div style={{display:'inline-flex',alignItems:'center',gap:'.5rem',fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)',letterSpacing:'.1em',textTransform:'uppercase'}}>
+            <div style={{width:24,height:24,borderRadius:5,background:'linear-gradient(135deg,#FFD60A,#FF8C00)',display:'grid',placeItems:'center',fontFamily:'var(--display)',fontWeight:900,color:'#0A0A14',fontSize:'.78rem'}}>S</div>
+            Powered by Supernova Editor
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function BookingCancelView({token}) {
+  const [status, setStatus] = useState('confirming');
+  const [reason, setReason] = useState('');
+  const cancel = async () => {
+    setStatus('working');
+    const r = await fetch('/api/calendar-cancel', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        cancellation_token: token, reason,
+        supabase_url: localStorage.getItem('eos-sb-url'),
+        supabase_key: localStorage.getItem('eos-sb-key'),
+      })
+    });
+    const data = await r.json();
+    setStatus(data.ok ? 'done' : 'error');
+  };
+  return (
+    <BookingShell>
+      <div className="card" style={{padding:'2rem',textAlign:'center'}}>
+        {status === 'confirming' && (<>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📅</div>
+          <h2>Cancel this booking?</h2>
+          <p style={{color:'var(--text-muted)',marginBottom:'1rem'}}>The host will be notified.</p>
+          <textarea className="input" rows={3} placeholder="Optional: reason" value={reason} onChange={e => setReason(e.target.value)} style={{marginBottom:'1rem'}}/>
+          <button className="btn btn-primary" onClick={cancel}>Cancel Booking</button>
+        </>)}
+        {status === 'working' && <p>Cancelling…</p>}
+        {status === 'done' && (<><div style={{fontSize:'2rem'}}>✓</div><h2>Cancelled</h2><a href="/" style={{color:'var(--yellow)'}}>Back to Supernova →</a></>)}
+        {status === 'error' && <p style={{color:'var(--red)'}}>Cancellation failed. The link may have expired or already been used.</p>}
+      </div>
+    </BookingShell>
+  );
+}
+
+function NewsletterConfirmView({token}) {
+  const [status, setStatus] = useState('confirming');
+  useEffect(() => {
+    (async () => {
+      const sb = window.SupabaseClient;
+      if (!sb || !sb.isReady()) { setStatus('error'); return; }
+      const rows = await sb.fetch('subscribers', {eq:{confirmation_token: token}, limit:1});
+      if (!rows?.[0]) { setStatus('error'); return; }
+      await sb.update('subscribers', rows[0].id, {status:'subscribed', confirmed_at: new Date().toISOString(), confirmation_token: null});
+      setStatus('done');
+    })();
+  }, [token]);
+  return (
+    <BookingShell>
+      <div className="card" style={{padding:'2.5rem',textAlign:'center'}}>
+        {status === 'confirming' && <p>Confirming your subscription…</p>}
+        {status === 'done' && (<><div style={{fontSize:'2.5rem',marginBottom:'.5rem'}}>✓</div><h2>You're confirmed!</h2><p style={{color:'var(--text-muted)'}}>Check your inbox for the welcome email.</p><a href="/" style={{color:'var(--yellow)'}}>Back to Supernova →</a></>)}
+        {status === 'error' && <p style={{color:'var(--red)'}}>That confirmation link is invalid or expired.</p>}
+      </div>
+    </BookingShell>
+  );
+}
+
+function tzWallClockToIso(dateStr, time, tz) {
+  // Mirror the server-side helper. Keep simple — browsers don't expose tz math
+  // directly, so we discover the offset for that exact date+time via Intl.
+  const [hh, mm] = time.split(':').map(Number);
+  const naive = new Date(`${dateStr}T${time}:00Z`);
+  const fmt = new Intl.DateTimeFormat('en-US', {timeZone: tz, hour12:false, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const parts = fmt.formatToParts(naive).reduce((o,p) => (o[p.type]=p.value, o), {});
+  const tzAsUtc = Date.UTC(+parts.year, +parts.month-1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  const offsetMin = (tzAsUtc - naive.getTime()) / 60000;
+  return new Date(naive.getTime() - offsetMin * 60000).toISOString();
+}
+
+/* ============================================================
+   NEWSLETTER SIGNUP — drop-in opt-in widget. Inline + standalone.
+   ============================================================ */
+function NewsletterSignupForm({listSlug = 'main', heading = 'Join the newsletter', subheading = 'One email a week. Strategy, frameworks, and case studies. No fluff.', cta = 'Subscribe'}) {
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/newsletter-subscribe', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          email, name: name || null, list_slug: listSlug, source: 'inline-widget',
+          supabase_url: localStorage.getItem('eos-sb-url'),
+          supabase_key: localStorage.getItem('eos-sb-key'),
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) setError(data.error || 'Subscription failed');
+      else setDone(data);
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  if (done) {
+    return (
+      <div className="card" style={{padding:'1.5rem',textAlign:'center',background:'rgba(0,230,138,0.04)',border:'1px solid rgba(0,230,138,0.25)'}}>
+        <div style={{fontSize:'2rem',marginBottom:'.4rem'}}>✓</div>
+        <strong>{done.status === 'pending_confirmation' ? 'Check your inbox.' : 'You\'re in.'}</strong>
+        <div style={{fontSize:'.82rem',color:'var(--text-muted)',marginTop:'.35rem'}}>{done.status === 'pending_confirmation' ? 'Click the confirm link we just sent you.' : 'See you Monday.'}</div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="card" style={{padding:'1.5rem'}}>
+      <h3 style={{margin:'0 0 .35rem'}}>{heading}</h3>
+      <p style={{margin:'0 0 1rem',color:'var(--text-muted)',fontSize:'.85rem'}}>{subheading}</p>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr auto',gap:'.4rem'}}>
+        <input className="input" type="text" placeholder="First name" value={name} onChange={e => setName(e.target.value)}/>
+        <input className="input" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required/>
+        <button className="btn btn-primary" type="submit" disabled={busy || !email}>{busy ? '…' : cta}</button>
+      </div>
+      {error && <div style={{padding:'.5rem',background:'rgba(255,80,80,0.1)',color:'var(--red)',borderRadius:6,marginTop:'.5rem',fontSize:'.78rem'}}>{error}</div>}
+      <div style={{fontSize:'.65rem',color:'var(--text-dim)',marginTop:'.5rem',fontFamily:'var(--mono)'}}>
+        Unsubscribe anytime · No spam ever · Powered by Supernova Editor
+      </div>
+    </form>
+  );
+}
 
 /* ============================================================
    FFMPEG.WASM EXPORT — bake CSS-filter previews into MP4/WebM/GIF.
@@ -10079,6 +10640,7 @@ function ViewRouter() {
     case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
     case 'campaigns': return <EmailCampaignsView />;
+    case 'calendars': return <CalendarSettingsView />;
     case 'legal': return <LegalView />;
     case 'settings': return <SettingsView />;
     default: return <DashboardView />;
@@ -10392,6 +10954,9 @@ function App() {
   const unsubscribeEmail = urlParams?.get('unsubscribe');
   const refSlug = urlParams?.get('ref');
   const upgraded = urlParams?.get('upgraded');
+  const bookSlug = urlParams?.get('book');
+  const cancelToken = urlParams?.get('cancel_booking');
+  const confirmSubToken = urlParams?.get('confirm_subscription');
 
   useEffect(() => {
     // Capture referral attribution on first hit
@@ -10447,6 +11012,9 @@ function App() {
   }, [queryView, unsubscribeEmail, setView]);
 
   if (magnetId) return <LeadMagnetView magnetId={magnetId} />;
+  if (bookSlug) return <CalendarBookingView slug={bookSlug} />;
+  if (cancelToken) return <BookingCancelView token={cancelToken} />;
+  if (confirmSubToken) return <NewsletterConfirmView token={confirmSubToken} />;
   if (unsubscribeEmail) return (
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg)',padding:'2rem'}}>
       <div className="card" style={{maxWidth:520,padding:'2.5rem',textAlign:'center'}}>
