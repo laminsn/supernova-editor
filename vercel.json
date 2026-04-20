@@ -13,5 +13,11 @@
     }
   ],
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "crons": [
+    {
+      "path": "/api/booking-reminder-cron",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

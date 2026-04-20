@@ -19,7 +19,7 @@ export default async function handler(req, res) {
 
   const {
     slug, starts_at_iso, attendee_name, attendee_email, attendee_phone = null,
-    timezone = null, custom_answers = {}, notes = null,
+    timezone = null, custom_answers = {}, notes = null, sms_consent = false,
     supabase_url, supabase_key,
   } = req.body || {};
 
@@ -71,6 +71,7 @@ export default async function handler(req, res) {
     cancellation_token: cancellationToken,
     reschedule_token: rescheduleToken,
     custom_answers, notes,
+    sms_consent: !!(sms_consent && attendee_phone),
   };
   const insertRes = await fetch(`${supabase_url}/rest/v1/bookings`, {
     method: 'POST',
@@ -101,13 +102,22 @@ export default async function handler(req, res) {
     attendeeEmail: attendee_email,
   });
 
-  // 6. Send confirmation emails (best-effort)
+  // 6. Send confirmation email (uses custom template if set, else default)
   if (process.env.RESEND_API_KEY) {
     const fromAddress = process.env.RESEND_FROM || 'Supernova Editor <onboarding@resend.dev>';
     sendConfirmationEmails({
       apiKey: process.env.RESEND_API_KEY, fromAddress,
       cal, booking, cancellationUrl, rescheduleUrl, ics,
     }).catch(e => console.warn('confirmation email failed:', e.message));
+  }
+
+  // 7. Fire confirmation SMS if attendee opted in + calendar has it enabled
+  if (booking.sms_consent && cal.sms_enabled && process.env.TWILIO_ACCOUNT_SID) {
+    fetch(`${baseUrl}/api/booking-sms`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({booking_id: booking.id, kind: 'confirmation'}),
+    }).catch(e => console.warn('confirmation SMS failed:', e.message));
   }
 
   return res.status(200).json({
@@ -155,7 +165,57 @@ function buildIcs({uid, summary, description, location, starts, ends, organizerE
 async function sendConfirmationEmails({apiKey, fromAddress, cal, booking, cancellationUrl, rescheduleUrl, ics}) {
   const escape = (s) => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const startsLocal = new Date(booking.starts_at).toLocaleString('en-US', {timeZone: booking.timezone, dateStyle: 'full', timeStyle: 'short'});
-  const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,Helvetica,Arial,sans-serif;">
+
+  // Custom template path: use cal.email_confirmation_subject + html if present.
+  let subject, html;
+  if (cal.email_confirmation_subject || cal.email_confirmation_html) {
+    subject = renderBookingVars(cal.email_confirmation_subject || `Confirmed: ${cal.name}`, booking, cal);
+    html = cal.email_confirmation_html
+      ? renderBookingVars(cal.email_confirmation_html, booking, cal)
+      : defaultConfirmationHtml({cal, booking, startsLocal, cancellationUrl, rescheduleUrl, escape});
+  } else {
+    subject = `Confirmed: ${cal.name} on ${startsLocal}`;
+    html = defaultConfirmationHtml({cal, booking, startsLocal, cancellationUrl, rescheduleUrl, escape});
+  }
+
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      from: fromAddress,
+      to: [booking.attendee_email],
+      subject,
+      html,
+      attachments: [{filename: 'invite.ics', content: Buffer.from(ics).toString('base64')}],
+    }),
+  });
+}
+
+function renderBookingVars(template, booking, calendar) {
+  const startDate = new Date(booking.starts_at);
+  const tz = booking.timezone || calendar?.timezone || 'America/New_York';
+  const fmt = (opts) => startDate.toLocaleString('en-US', {timeZone: tz, ...opts});
+  const baseUrl = process.env.PUBLIC_URL || 'https://supernova-editor.vercel.app';
+  const vars = {
+    '{{name}}':           booking.attendee_name || 'there',
+    '{{first_name}}':     (booking.attendee_name || '').split(' ')[0] || 'there',
+    '{{calendar}}':       calendar?.name || 'your meeting',
+    '{{date}}':           fmt({weekday:'short', month:'short', day:'numeric'}),
+    '{{time}}':           fmt({hour:'numeric', minute:'2-digit'}),
+    '{{datetime}}':       fmt({dateStyle:'full', timeStyle:'short'}),
+    '{{tz}}':             tz,
+    '{{duration}}':       booking.duration_minutes + ' min',
+    '{{meeting_link}}':   booking.meeting_link || '',
+    '{{cancel_url}}':     `${baseUrl}/?cancel_booking=${booking.cancellation_token}`,
+    '{{reschedule_url}}': `${baseUrl}/?reschedule_booking=${booking.reschedule_token}`,
+  };
+  let out = String(template);
+  for (const [k, v] of Object.entries(vars)) out = out.split(k).join(v);
+  return out;
+}
+
+function defaultConfirmationHtml({cal, booking, startsLocal, cancellationUrl, rescheduleUrl, escape}) {
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:24px 0;"><tr><td align="center">
 <table width="640" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);">
   <tr><td style="background:linear-gradient(135deg,#FFD60A 0%,#FF8C00 100%);padding:24px;color:#0A0A14;">
@@ -178,20 +238,4 @@ async function sendConfirmationEmails({apiKey, fromAddress, cal, booking, cancel
     Supernova Editor · Powered by Claude AI
   </td></tr>
 </table></td></tr></table></body></html>`;
-
-  // Attendee email
-  await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      from: fromAddress,
-      to: [booking.attendee_email],
-      subject: `Confirmed: ${cal.name} on ${startsLocal}`,
-      html,
-      attachments: [{filename: 'invite.ics', content: Buffer.from(ics).toString('base64')}],
-    }),
-  });
-
-  // Host notification (if calendar owner email is on the user record — best-effort fallback to RESEND_FROM)
-  // Keeping minimal for now; production would join calendars.user_id → profiles.email.
 }

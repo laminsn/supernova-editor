@@ -28,6 +28,26 @@ CREATE TABLE IF NOT EXISTS calendars (
   ask_for_phone boolean DEFAULT false,
   custom_questions jsonb DEFAULT '[]'::jsonb,      -- [{label, type:'text|textarea|select', required, options}]
   enabled boolean DEFAULT true,
+
+  -- Email lifecycle templates (variables: {{name}} {{calendar}} {{date}} {{time}} {{tz}}
+  --   {{meeting_link}} {{cancel_url}} {{reschedule_url}})
+  email_confirmation_subject text,
+  email_confirmation_html text,
+  email_24h_subject text,
+  email_24h_html text,
+  email_1h_subject text,
+  email_1h_html text,
+
+  -- SMS lifecycle templates (160 char target; same variables)
+  sms_enabled boolean DEFAULT false,
+  sms_confirmation_text text,
+  sms_24h_text text,
+  sms_1h_text text,
+
+  -- Reminder schedule toggles
+  send_reminder_24h boolean DEFAULT true,
+  send_reminder_1h boolean DEFAULT true,
+
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -89,6 +109,14 @@ CREATE INDEX IF NOT EXISTS bookings_calendar_idx ON bookings(calendar_id, starts
 CREATE INDEX IF NOT EXISTS bookings_attendee_idx ON bookings(attendee_email, starts_at);
 CREATE INDEX IF NOT EXISTS bookings_status_idx ON bookings(status, starts_at);
 CREATE INDEX IF NOT EXISTS bookings_cancellation_token_idx ON bookings(cancellation_token);
+
+-- Reminder send tracking (per-window so the cron worker is idempotent)
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reminder_24h_sent_at timestamptz;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reminder_1h_sent_at  timestamptz;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sms_consent          boolean DEFAULT false;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sms_log              jsonb   DEFAULT '[]'::jsonb;
+CREATE INDEX IF NOT EXISTS bookings_due_reminders_idx ON bookings(starts_at)
+  WHERE status = 'confirmed';
 
 -- ============================================================
 -- NEWSLETTER LISTS — multiple lists per workspace

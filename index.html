@@ -8842,6 +8842,7 @@ function CalendarSettingsView() {
 function CalendarEditor({cal, onSave, onCancel}) {
   const {addToast} = useApp();
   const [form, setForm] = useState(cal);
+  const [tab, setTab] = useState('details');
   const u = (k,v) => setForm(p => ({...p,[k]:v}));
   const upAvail = (idx, k, v) => {
     const next = [...(form._availability || [])];
@@ -8868,6 +8869,20 @@ function CalendarEditor({cal, onSave, onCancel}) {
           onSave(form);
         }}>Save</button>
       </div>
+
+      {/* Tab switcher */}
+      <div style={{display:'flex',gap:'.4rem',marginBottom:'1rem',borderBottom:'1px solid var(--border)',paddingBottom:'.5rem'}}>
+        {[{k:'details',l:'⚙️ Details + Availability'},{k:'email',l:'📧 Email Templates'},{k:'sms',l:'📱 SMS Templates'}].map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            style={{padding:'.45rem .85rem',background: tab === t.k ? 'var(--yellow)' : 'transparent',color: tab === t.k ? '#0A0A14' : 'var(--text-muted)',border:'1px solid '+(tab === t.k ? 'var(--yellow)' : 'var(--border)'),borderRadius:7,fontSize:'.78rem',fontWeight: tab === t.k ? 700 : 500,cursor:'pointer'}}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'email' && <EmailTemplatesTab form={form} u={u}/>}
+      {tab === 'sms' && <SmsTemplatesTab form={form} u={u}/>}
+      {tab !== 'details' ? null : (
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem'}}>
         <div className="card">
@@ -8941,6 +8956,138 @@ function CalendarEditor({cal, onSave, onCancel}) {
           })}
         </div>
       </div>
+      )}
+    </div>
+  );
+}
+
+const TEMPLATE_VARS = [
+  {token:'{{name}}',          desc:'Attendee full name'},
+  {token:'{{first_name}}',    desc:'Attendee first name'},
+  {token:'{{calendar}}',      desc:'Calendar name (e.g., "Discovery Call")'},
+  {token:'{{date}}',          desc:'Mon, Apr 22'},
+  {token:'{{time}}',          desc:'2:30 PM'},
+  {token:'{{datetime}}',      desc:'Friday, April 22, 2026 at 2:30 PM'},
+  {token:'{{tz}}',            desc:'Timezone (e.g., America/New_York)'},
+  {token:'{{duration}}',      desc:'30 min'},
+  {token:'{{meeting_link}}',  desc:'Zoom/Meet/phone link'},
+  {token:'{{cancel_url}}',    desc:'One-click cancel link'},
+  {token:'{{reschedule_url}}',desc:'One-click reschedule link'},
+];
+
+function VariablePicker({onPick}) {
+  return (
+    <div style={{display:'flex',flexWrap:'wrap',gap:'.25rem',marginBottom:'.4rem'}}>
+      {TEMPLATE_VARS.map(v => (
+        <button key={v.token} type="button" onClick={() => onPick(v.token)} title={v.desc}
+          style={{padding:'.18rem .45rem',background:'var(--glass)',border:'1px solid var(--border)',borderRadius:4,fontFamily:'var(--mono)',fontSize:'.65rem',cursor:'pointer',color:'var(--yellow)'}}>{v.token}</button>
+      ))}
+    </div>
+  );
+}
+
+function EmailTemplateBlock({title, subjectKey, htmlKey, defaultSubject, form, u}) {
+  const taRef = useRef(null);
+  const insertVar = (token) => {
+    const ta = taRef.current; if (!ta) return;
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const newVal = (form[htmlKey] || '').slice(0, start) + token + (form[htmlKey] || '').slice(end);
+    u(htmlKey, newVal);
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start + token.length, start + token.length); }, 10);
+  };
+  return (
+    <div className="card" style={{marginBottom:'1rem'}}>
+      <div className="card-head"><h3>{title}</h3></div>
+      <label className="field"><span className="lbl">Subject line</span>
+        <input className="input" placeholder={defaultSubject} value={form[subjectKey] || ''} onChange={e => u(subjectKey, e.target.value)}/>
+      </label>
+      <label className="field" style={{marginBottom:'.4rem'}}><span className="lbl">HTML body — leave blank to use Supernova's branded default</span></label>
+      <VariablePicker onPick={insertVar}/>
+      <textarea ref={taRef} className="input" rows={10} value={form[htmlKey] || ''} onChange={e => u(htmlKey, e.target.value)}
+        placeholder="<h2>Hi {{first_name}},</h2><p>Your {{calendar}} is set for {{datetime}}…</p>"
+        style={{fontFamily:'var(--mono)',fontSize:'.78rem'}}/>
+    </div>
+  );
+}
+
+function EmailTemplatesTab({form, u}) {
+  return (
+    <div style={{maxWidth:920}}>
+      <div className="card" style={{marginBottom:'1rem',background:'rgba(255,214,10,0.04)',border:'1px solid var(--yellow-glow-strong)'}}>
+        <div style={{display:'flex',gap:'.75rem',alignItems:'center'}}>
+          <span style={{fontSize:'1.4rem'}}>📧</span>
+          <div style={{flex:1}}>
+            <strong>Email lifecycle</strong>
+            <div style={{fontSize:'.78rem',color:'var(--text-muted)'}}>Three emails fire automatically: confirmation (instant), 24-hour reminder, 1-hour reminder. Use the template buttons to insert variables.</div>
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:'.4rem',fontSize:'.78rem'}}>
+            <input type="checkbox" checked={form.send_reminder_24h !== false} onChange={e => u('send_reminder_24h', e.target.checked)} style={{accentColor:'var(--yellow)'}}/>24h reminder
+          </label>
+          <label style={{display:'flex',alignItems:'center',gap:'.4rem',fontSize:'.78rem'}}>
+            <input type="checkbox" checked={form.send_reminder_1h !== false} onChange={e => u('send_reminder_1h', e.target.checked)} style={{accentColor:'var(--yellow)'}}/>1h reminder
+          </label>
+        </div>
+      </div>
+      <EmailTemplateBlock title="✓ Confirmation Email"      subjectKey="email_confirmation_subject" htmlKey="email_confirmation_html" defaultSubject="Confirmed: {{calendar}} on {{datetime}}" form={form} u={u}/>
+      <EmailTemplateBlock title="🕐 24-Hour Reminder"        subjectKey="email_24h_subject"          htmlKey="email_24h_html"          defaultSubject="Reminder: {{calendar}} tomorrow at {{time}}"      form={form} u={u}/>
+      <EmailTemplateBlock title="⚡ 1-Hour Reminder"          subjectKey="email_1h_subject"           htmlKey="email_1h_html"           defaultSubject="Starting in 1 hour: {{calendar}}"               form={form} u={u}/>
+    </div>
+  );
+}
+
+function SmsTemplateBlock({title, key, defaultText, form, u, charLimit = 160}) {
+  const taRef = useRef(null);
+  const val = form[key] || '';
+  const insertVar = (token) => {
+    const ta = taRef.current; if (!ta) return;
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    u(key, val.slice(0, start) + token + val.slice(end));
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start + token.length, start + token.length); }, 10);
+  };
+  return (
+    <div className="card" style={{marginBottom:'1rem'}}>
+      <div className="card-head"><h3>{title}</h3>
+        <span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color: val.length > charLimit ? 'var(--red)' : 'var(--text-dim)'}}>{val.length}/{charLimit}</span>
+      </div>
+      <VariablePicker onPick={insertVar}/>
+      <textarea ref={taRef} className="input" rows={3} value={val} onChange={e => u(key, e.target.value)}
+        placeholder={defaultText}
+        style={{fontFamily:'var(--mono)',fontSize:'.82rem'}}/>
+      <div style={{fontSize:'.65rem',color:'var(--text-dim)',marginTop:'.4rem',fontFamily:'var(--mono)'}}>"Reply STOP to opt out." appended automatically (10DLC compliance).</div>
+    </div>
+  );
+}
+
+function SmsTemplatesTab({form, u}) {
+  return (
+    <div style={{maxWidth:920}}>
+      <div className="card" style={{marginBottom:'1rem',background:'rgba(255,214,10,0.04)',border:'1px solid var(--yellow-glow-strong)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'.75rem'}}>
+          <span style={{fontSize:'1.4rem'}}>📱</span>
+          <div style={{flex:1}}>
+            <strong>SMS lifecycle (A2P 10DLC)</strong>
+            <div style={{fontSize:'.78rem',color:'var(--text-muted)'}}>When enabled, attendees see an SMS opt-in checkbox at booking. Sent via Twilio. Requires <code style={{fontFamily:'var(--mono)'}}>TWILIO_ACCOUNT_SID</code> + <code style={{fontFamily:'var(--mono)'}}>AUTH_TOKEN</code> + <code style={{fontFamily:'var(--mono)'}}>FROM_NUMBER</code>.</div>
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:'.4rem',fontSize:'.85rem'}}>
+            <input type="checkbox" checked={!!form.sms_enabled} onChange={e => u('sms_enabled', e.target.checked)} style={{accentColor:'var(--yellow)',width:18,height:18}}/>SMS enabled
+          </label>
+        </div>
+      </div>
+      {form.sms_enabled ? (
+        <>
+          <SmsTemplateBlock title="✓ Confirmation SMS" key="sms_confirmation_text" form={form} u={u}
+            defaultText="Hi {{first_name}}, your {{calendar}} is booked for {{date}} at {{time}} ({{tz}}). Cancel: {{cancel_url}}"/>
+          <SmsTemplateBlock title="🕐 24-Hour Reminder SMS" key="sms_24h_text" form={form} u={u}
+            defaultText="Reminder: {{calendar}} tomorrow at {{time}} ({{tz}}). {{meeting_link}}"/>
+          <SmsTemplateBlock title="⚡ 1-Hour Reminder SMS"   key="sms_1h_text" form={form} u={u}
+            defaultText="Starting in 1 hour: {{calendar}} at {{time}}. {{meeting_link}}"/>
+        </>
+      ) : (
+        <div className="card" style={{padding:'2rem',textAlign:'center',color:'var(--text-dim)'}}>
+          <div style={{fontSize:'2rem',marginBottom:'.5rem'}}>📵</div>
+          <div>SMS is off. Enable it above to add Twilio templates.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -8961,7 +9108,7 @@ function CalendarBookingView({slug}) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [step, setStep] = useState('pick'); // pick | form | done
-  const [form, setForm] = useState({name:'', email:'', phone:'', notes:''});
+  const [form, setForm] = useState({name:'', email:'', phone:'', notes:'', sms_consent:false});
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(null);
 
@@ -8994,6 +9141,7 @@ function CalendarBookingView({slug}) {
         slug, starts_at_iso: tzWallClockToIso(selectedDate, selectedTime, calendar.timezone),
         attendee_name: form.name, attendee_email: form.email,
         attendee_phone: form.phone || null,
+        sms_consent: !!form.sms_consent,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         notes: form.notes || null,
         supabase_url: sbUrl, supabase_key: sbKey,
@@ -9077,7 +9225,17 @@ function CalendarBookingView({slug}) {
           <div style={{fontSize:'.82rem',color:'var(--text-muted)',marginBottom:'1rem'}}>{calendar.name} · {selectedDate} at {selectedTime} ({calendar.timezone})</div>
           <label className="field"><span className="lbl">Name *</span><input className="input" value={form.name} onChange={e => setForm({...form, name:e.target.value})} required/></label>
           <label className="field"><span className="lbl">Email *</span><input className="input" type="email" value={form.email} onChange={e => setForm({...form, email:e.target.value})} required/></label>
-          {calendar.ask_for_phone && <label className="field"><span className="lbl">Phone</span><input className="input" type="tel" value={form.phone} onChange={e => setForm({...form, phone:e.target.value})}/></label>}
+          {(calendar.ask_for_phone || calendar.sms_enabled) && (
+            <label className="field"><span className="lbl">Phone {calendar.sms_enabled ? '(for SMS reminders)' : ''}</span>
+              <input className="input" type="tel" placeholder="+1 555 123 4567" value={form.phone} onChange={e => setForm({...form, phone:e.target.value})}/>
+            </label>
+          )}
+          {calendar.sms_enabled && form.phone && (
+            <label style={{display:'flex',alignItems:'flex-start',gap:'.5rem',padding:'.6rem',background:'rgba(255,214,10,0.04)',border:'1px solid var(--yellow-glow)',borderRadius:8,marginBottom:'.75rem',cursor:'pointer'}}>
+              <input type="checkbox" checked={!!form.sms_consent} onChange={e => setForm({...form, sms_consent:e.target.checked})} style={{accentColor:'var(--yellow)',marginTop:2}}/>
+              <span style={{fontSize:'.78rem',color:'var(--text-muted)',lineHeight:1.5}}>I agree to receive SMS confirmation + reminders for this booking. Reply STOP anytime to opt out. Standard message rates apply. <strong>Mobile info will not be shared with third parties for marketing.</strong></span>
+            </label>
+          )}
           <label className="field"><span className="lbl">Anything we should know?</span><textarea className="input" rows={3} value={form.notes} onChange={e => setForm({...form, notes:e.target.value})}/></label>
           {error && <div style={{padding:'.6rem',background:'rgba(255,80,80,0.1)',color:'var(--red)',borderRadius:6,marginBottom:'.75rem',fontSize:'.82rem'}}>{error}</div>}
           <button className="btn btn-primary" disabled={submitting || !form.name || !form.email} onClick={submit} style={{width:'100%'}}>{submitting ? '⚡ Booking…' : 'Confirm Booking'}</button>
