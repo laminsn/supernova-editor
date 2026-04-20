@@ -30,9 +30,13 @@ DROP POLICY IF EXISTS profiles_insert      ON profiles;
 DROP POLICY IF EXISTS profiles_owner_read  ON profiles;
 DROP POLICY IF EXISTS profiles_owner_write ON profiles;
 DROP POLICY IF EXISTS profiles_owner_insert ON profiles;
+DROP POLICY IF EXISTS profiles_self_insert ON profiles;
 CREATE POLICY profiles_owner_read   ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY profiles_owner_write  ON profiles FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
--- Insert allowed only via the on-auth-user trigger (security definer); no public insert.
+-- Self-insert: lets the client `upsertProfile` fall back when the on-auth trigger
+-- didn't fire (e.g., signup happened before the auth-referrals migration ran).
+-- Constraint guarantees the inserted row id matches the caller's auth.uid().
+CREATE POLICY profiles_self_insert  ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- ============================================================
 -- referrals — referrer can see their own; public can insert (sign-up form)

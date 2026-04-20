@@ -17,6 +17,9 @@
 <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<!-- ffmpeg.wasm 0.12 — UMD bundles. Lazy-init in ExportModal (~25MB cached after first load). -->
+<script src="https://unpkg.com/@ffmpeg/[email protected]/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/[email protected]/dist/umd/util.js"></script>
 <script>
 // Sentry — lazy-loaded only if a DSN is exposed via window.SUPERNOVA_SENTRY_DSN
 // Inject the DSN at deploy time (Vercel build env → static replace) or via
@@ -920,6 +923,11 @@ function AppProvider({children}) {
     setToasts(prev => [...prev, {id, msg, type}]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
   }, []);
+  // Expose addToast to window so background SDK callbacks (SupabaseClient,
+  // Sentry, OAuth redirects) can surface errors without prop-drilling.
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.__supernovaToast = addToast;
+  }, [addToast]);
   const toggleTheme = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
 
   // Bootstrap auth state and react to OAuth callback redirects.
@@ -961,9 +969,10 @@ function AppProvider({children}) {
           setCurrentProfile(p);
           if (event === 'SIGNED_IN') {
             setAuthGateOpen(false);
-            // Show plan picker on first sign-in
+            // First sign-in (no plan selected yet) → full-page pricing.
+            // Returning users with a plan go straight to dashboard.
             if (!p?.plan || p.plan === 'free') {
-              setTimeout(() => setPlanPickerOpen(true), 600);
+              setTimeout(() => setView('pricing'), 600);
             }
           }
         } else {
@@ -995,6 +1004,54 @@ function useApp() { return useContext(AppContext); }
 /* ============================================================
    SUPABASE CLIENT (auto-activates with credentials in Settings)
    ============================================================ */
+// Plan quota limits (mirrors api/usage-check.js — keep in sync)
+const PLAN_LIMITS = {
+  free:       {strategy:5,    blog:1,    workflow:2,   image:10,   voiceover:0,    transcribe:5},
+  creator:    {strategy:9999, blog:9999, workflow:9999, image:500,  voiceover:30,   transcribe:200},
+  pro:        {strategy:9999, blog:9999, workflow:9999, image:2000, voiceover:200,  transcribe:1000},
+  enterprise: {strategy:99999,blog:99999,workflow:99999,image:99999,voiceover:99999,transcribe:99999},
+};
+const QUOTA_METRIC_LABELS = {
+  strategy:'Strategies', blog:'Blog Posts', workflow:'Workflows',
+  image:'AI Images', voiceover:'Voiceovers', transcribe:'Transcriptions',
+};
+
+// withQuota: gates an async AI fn behind the usage-check API.
+//   await withQuota({metric:'strategy', plan, workspaceId, addToast, openPlanPicker}, async () => fetch(...));
+// Returns the inner result, or null if quota is hit (caller should bail).
+async function withQuota({metric, plan, workspaceId, addToast, onQuotaExceeded}, fn) {
+  if (!workspaceId) {
+    // No workspace yet (anon user) → allow, server will reject if needed.
+    return await fn();
+  }
+  const sbUrl = localStorage.getItem('eos-sb-url');
+  const sbKey = localStorage.getItem('eos-sb-key');
+  if (!sbUrl || !sbKey) return await fn(); // No backend wired → allow locally
+  try {
+    const check = await fetch('/api/usage-check', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({workspace_id: workspaceId, metric, plan: plan || 'free', mode:'check', supabase_url: sbUrl, supabase_key: sbKey}),
+    });
+    const data = await check.json();
+    if (!data.ok) {
+      addToast?.(data.reason || `${QUOTA_METRIC_LABELS[metric]} limit reached — upgrade to continue.`, 'error');
+      onQuotaExceeded?.();
+      return null;
+    }
+    const result = await fn();
+    // Increment only on success (no throw)
+    fetch('/api/usage-check', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({workspace_id: workspaceId, metric, plan: plan || 'free', mode:'increment', supabase_url: sbUrl, supabase_key: sbKey}),
+    }).catch(() => {});
+    return result;
+  } catch (e) {
+    // On metering failure, don't block the user — fail open
+    console.warn('quota check failed (allowing):', e.message);
+    return await fn();
+  }
+}
+
 const SupabaseClient = (() => {
   let client = null;
   let workspaceId = localStorage.getItem('eos-workspace-id') || null;
@@ -1045,9 +1102,16 @@ const SupabaseClient = (() => {
     async signIn(email, password) { if (!client) return null; return await client.auth.signInWithPassword({email, password}); },
     async signUp(email, password, meta = {}) { if (!client) return null; return await client.auth.signUp({email, password, options:{data: meta}}); },
     async signInWithOAuth(provider, options = {}) {
-      if (!client) return null;
-      const redirectTo = options.redirectTo || window.location.origin;
-      return await client.auth.signInWithOAuth({provider, options: {redirectTo, ...options}});
+      if (!client) return {error: {message: 'Supabase not connected. Open Settings → Advanced.'}};
+      const redirectTo = options.redirectTo || (window.location.origin + '/');
+      // Google needs offline access + consent prompt for refresh tokens
+      const queryParams = options.queryParams ||
+        (provider === 'google' ? {access_type: 'offline', prompt: 'consent'} : undefined);
+      const scopes = options.scopes;
+      return await client.auth.signInWithOAuth({
+        provider,
+        options: {redirectTo, queryParams, scopes},
+      });
     },
     async signInWithMagicLink(email, options = {}) {
       if (!client) return null;
@@ -1061,12 +1125,43 @@ const SupabaseClient = (() => {
     async loadProfile(userId) {
       if (!client || !userId) return null;
       const rows = await this.fetch('profiles', {eq:{id: userId}, limit:1});
-      return rows?.[0] || null;
+      if (rows?.[0]) return rows[0];
+      // Self-heal: trigger didn't fire (user signed up before migration ran),
+      // or strict RLS just got applied. Build a profile from auth metadata.
+      try {
+        const user = await this.getUser();
+        if (!user || user.id !== userId) return null;
+        const meta = user.user_metadata || {};
+        const base = (meta.first_name || meta.given_name
+          || (meta.full_name || meta.name || user.email || 'creator').split(/[ @]/)[0])
+          .toLowerCase().replace(/[^a-z0-9]+/g, '') || 'creator';
+        const slug = base + Math.floor(Math.random() * 9000 + 1000);
+        return await this.upsertProfile({
+          id: user.id,
+          email: user.email,
+          first_name: meta.first_name || meta.given_name || base,
+          display_name: meta.full_name || meta.name || base,
+          avatar_url: meta.avatar_url || meta.picture || null,
+          referral_slug: slug,
+        });
+      } catch (e) {
+        console.warn('profile self-heal failed:', e.message);
+        return null;
+      }
     },
     async upsertProfile(profile) {
       if (!client) return null;
       const {data, error} = await client.from('profiles').upsert(profile, {onConflict:'id'}).select();
-      if (error) { console.warn('profile upsert:', error.message); return null; }
+      if (error) {
+        console.error('profile upsert error:', error.message, error);
+        // Surface to UI via a global toast hook (set by AppProvider). Silent
+        // failures here are exactly what made "saving a new user profile is
+        // showing an error" so hard to diagnose in production.
+        if (typeof window !== 'undefined' && window.__supernovaToast) {
+          window.__supernovaToast('Profile save failed: ' + (error.message || 'unknown'), 'error');
+        }
+        return null;
+      }
       return data?.[0];
     },
   };
@@ -1339,9 +1434,9 @@ function LandingPage() {
     else setAuthGateOpen(true);
   }, [currentUser, setView, setAuthGateOpen]);
   const launchPaid = useCallback(() => {
-    if (currentUser) setPlanPickerOpen(true);
+    if (currentUser) setView('pricing');
     else setAuthGateOpen(true);
-  }, [currentUser, setAuthGateOpen, setPlanPickerOpen]);
+  }, [currentUser, setAuthGateOpen, setView]);
 
   return (
     <div>
@@ -1862,7 +1957,7 @@ function SidebarUserChip() {
    ============================================================ */
 function Topbar() {
   const {view, toggleTheme, theme, lang, setLang, setSidebarOpen, setCmdOpen} = useApp();
-  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',campaigns:'Email Campaigns',legal:'Terms & Privacy',settings:'Settings'};
+  const viewLabels = {dashboard:'Dashboard',create:'Strategy Engine',editor:'Editor',thumbnails:'Thumbnails',collage:'Collage Mode',library:'Content Library',repurpose:'Repurposer',translate:'Translate',publish:'Publish',hashtags:'Hashtag Intel',analytics:'Analytics',spy:'Competitor Spy',collaboration:'Collaboration',email:'Email Studio',livestream:'Live Stream',workflows:'Workflows',blog:'Blog Builder',assets:'Asset Library',referrals:'Refer & Earn',campaigns:'Email Campaigns',pricing:'Pricing',legal:'Terms & Privacy',settings:'Settings'};
 
   return (
     <div className="topbar">
@@ -2021,6 +2116,8 @@ function DashboardView() {
           <div className="bar" style={{width: (showStats.brainAvg || 50) + '%'}}></div>
         </div>
       </div>
+
+      <UsageMeter />
 
       <div className="grid-2">
         <div className="card">
@@ -2696,6 +2793,16 @@ function EditorView() {
   const [previewFilter, setPreviewFilter] = useState(null);
   const [punchInOpen, setPunchInOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportBlob, setExportBlob] = useState(null);
+  const openExport = (blob) => {
+    if (!blob) {
+      addToast('Record or import a clip first, then export. Use Punch-In to capture a take.', 'info');
+      return;
+    }
+    setExportBlob(blob);
+    setExportOpen(true);
+  };
 
   const handleApplyTemplate = (item) => {
     if (item.type === 'pack') {
@@ -2852,7 +2959,7 @@ function EditorView() {
             <option value="side-by-side">Side by Side</option>
             <option value="pip">PiP Reaction</option>
           </select>
-          <button className="btn btn-primary btn-sm" onClick={() => addToast('Export started...', 'info')}>
+          <button className="btn btn-primary btn-sm" onClick={() => openExport(exportBlob)}>
             {Icons.download} Export
           </button>
         </div>
@@ -2961,9 +3068,17 @@ function EditorView() {
         onClose={() => setPunchInOpen(false)}
         clipName={selectedClip ? clips.find(c => c.id === selectedClip)?.name : 'this clip'}
         onCommit={({blob, durationSec}) => {
-          // Local-only commit for now; real impl posts to /api/upload-recording
-          addToast(`Punch-in saved (${durationSec.toFixed(1)}s) — committed locally`, 'success');
+          setExportBlob(blob);
+          addToast(`Punch-in saved (${durationSec.toFixed(1)}s) — ready to Export`, 'success');
         }}
+      />
+
+      {/* EXPORT MODAL — bake CSS effects into MP4/WebM/GIF */}
+      <ExportModal
+        open={exportOpen}
+        inputBlob={exportBlob}
+        cssFilter={previewFilter || appliedEffect?.filter}
+        onClose={() => setExportOpen(false)}
       />
 
       {/* AUTO-EDIT SIDE PANEL */}
@@ -5956,6 +6071,8 @@ function ScreenRecordView() {
   const [recording, setRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [recordedUrl, setRecordedUrl] = useState(null);
+  const [recordedBlob, setRecordedBlob] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [duration, setDuration] = useState(0);
   const [layout, setLayout] = useState('single'); // single, split, triple, pip
   const [includeMic, setIncludeMic] = useState(true);
@@ -6132,8 +6249,9 @@ function ScreenRecordView() {
       stopDraw = true;
       const blob = new Blob(chunks, {type: 'video/webm'});
       setRecordedChunks(chunks);
+      setRecordedBlob(blob);
       setRecordedUrl(URL.createObjectURL(blob));
-      addToast('Recording complete! Click Download to save.','success');
+      addToast('Recording complete! Click Download or Export.','success');
     };
     recorder.start(1000);
     recorderRef.current = recorder;
@@ -6200,7 +6318,8 @@ function ScreenRecordView() {
           <button className="btn btn-ghost btn-sm" onClick={() => setVaultOpen(true)}>📚 Strategy Vault</button>
           {!recording && screens.length > 0 && <button className="btn btn-primary" onClick={composeAndRecord} style={{background:'var(--red)',color:'#fff'}}>● Start Recording</button>}
           {recording && <button className="btn btn-primary" onClick={stopRecording}>■ Stop</button>}
-          {recordedUrl && !recording && <button className="btn btn-primary" onClick={downloadRecording}>{Icons.download} Download</button>}
+          {recordedUrl && !recording && <button className="btn btn-ghost" onClick={downloadRecording}>{Icons.download} Download Raw</button>}
+          {recordedUrl && !recording && <button className="btn btn-primary" onClick={() => setExportOpen(true)}>{Icons.sparkle} Export (MP4 / WebM / GIF)</button>}
         </div>
       </div>
 
@@ -6370,6 +6489,12 @@ function ScreenRecordView() {
           </div>
         </div>
       </div>
+      <ExportModal
+        open={exportOpen}
+        inputBlob={recordedBlob}
+        cssFilter={null}
+        onClose={() => setExportOpen(false)}
+      />
     </div>
   );
 }
@@ -6378,124 +6503,313 @@ function ScreenRecordView() {
    COMMENT MONITOR — Auto-moderate comments across platforms
    ============================================================ */
 function CommentMonitorView() {
-  const {addToast} = useApp();
-  const [filterRules, setFilterRules] = useState([
-    {id:1, type:'hide', match:'sentiment', value:'negative', enabled:true},
-    {id:2, type:'hide', match:'keyword', value:'spam, scam, fake', enabled:true},
-    {id:3, type:'flag', match:'keyword', value:'refund, broken, terrible', enabled:true},
-    {id:4, type:'reply', match:'keyword', value:'price, cost, how much', enabled:false, reply:'Thanks for asking! DM me for current pricing 💛'},
-  ]);
-  const [autoMode, setAutoMode] = useState(true);
-  const [recentComments] = useState([
-    {id:1, platform:'ig', user:'@haterX', text:'this is garbage spam', sentiment:'negative', action:'hidden', time:'2m ago'},
-    {id:2, platform:'fb', user:'Tom B.', text:'Love this! Where can I learn more?', sentiment:'positive', action:'liked', time:'15m ago'},
-    {id:3, platform:'yt', user:'@curiousmind', text:'How much does it cost?', sentiment:'neutral', action:'auto-replied', time:'1h ago'},
-    {id:4, platform:'ig', user:'@scammer99', text:'Click my link for free crypto!!!', sentiment:'spam', action:'hidden + reported', time:'2h ago'},
-    {id:5, platform:'tt', user:'@realuser', text:'This actually works, thank you 🔥', sentiment:'positive', action:'pinned', time:'3h ago'},
-    {id:6, platform:'fb', user:'Mike R.', text:'You are a fraud and a scam', sentiment:'negative', action:'hidden', time:'5h ago'},
-  ]);
+  const {addToast, currentUser, setView} = useApp();
+  const [comments, setComments] = useState([]);
+  const [rules, setRules] = useState([]);
+  const [connections, setConnections] = useState([]);
+  const [autoMode, setAutoMode] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [ruleEditorOpen, setRuleEditorOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [replyText, setReplyText] = useState('');
 
-  const platforms = [
-    {key:'fb', name:'Facebook', icon:'📘', supported:true, perm:'pages_manage_engagement', desc:'Hide/delete comments on Pages you admin', status:'available'},
-    {key:'ig', name:'Instagram', icon:'📷', supported:true, perm:'instagram_manage_comments', desc:'Hide comments on Business/Creator accounts (linked to FB Page)', status:'available'},
-    {key:'yt', name:'YouTube', icon:'▶️', supported:true, perm:'youtube.force-ssl', desc:'Set comments to held/rejected on owned channels', status:'available'},
-    {key:'tt', name:'TikTok', icon:'🎵', supported:false, perm:'TikTok Business API', desc:'Limited — requires TikTok for Business advertiser account', status:'limited'},
-    {key:'li', name:'LinkedIn', icon:'💼', supported:true, perm:'w_organization_social', desc:'Manage comments on Company Pages you admin', status:'available'},
-    {key:'x', name:'X / Twitter', icon:'𝕏', supported:false, perm:'X API v2 Pro tier', desc:'Requires paid X API access ($100+/mo)', status:'paid'},
-  ];
+  const sb = window.SupabaseClient;
+  const sbReady = sb && sb.isReady();
+  const wsId = sb?.getWorkspaceId?.();
 
-  const sentimentColor = (s) => s==='positive'?'var(--green)':s==='negative'?'var(--red)':s==='spam'?'var(--magenta)':'var(--text-dim)';
-  const actionColor = (a) => a.includes('hidden')?'var(--red)':a.includes('liked')?'var(--green)':a.includes('replied')?'var(--blue)':a.includes('pinned')?'var(--yellow)':'var(--text-dim)';
+  const sentimentColor = (s) => ({positive:'var(--green)', neutral:'var(--text-dim)', negative:'var(--red)', spam:'var(--magenta)'})[s] || 'var(--text-dim)';
+  const actionColor = (a) => ({hidden:'var(--red)', deleted:'var(--red)', replied:'var(--blue)', flagged:'var(--amber)', none:'var(--text-dim)'})[a] || 'var(--text-dim)';
+
+  const load = useCallback(async () => {
+    if (!sbReady || !currentUser?.id) return;
+    const [c, r, conns] = await Promise.all([
+      sb.fetch('comments', {eq: wsId ? {workspace_id: wsId} : {user_id: currentUser.id}, order:'fetched_at', ascending:false, limit:80}),
+      sb.fetch('comment_rules', {eq: wsId ? {workspace_id: wsId} : {user_id: currentUser.id}, order:'priority', ascending:false}),
+      sb.fetch('social_connections', {eq:{user_id: currentUser.id}, limit:20}),
+    ]);
+    if (c) setComments(c);
+    if (r) setRules(r);
+    if (conns) setConnections(conns);
+  }, [sbReady, wsId, currentUser?.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const stats = useMemo(() => {
+    const today = comments.filter(c => new Date(c.fetched_at) > new Date(Date.now() - 86400000));
+    return {
+      hidden: today.filter(c => c.action_taken === 'hidden').length,
+      replied: today.filter(c => c.action_taken === 'replied').length,
+      flagged: today.filter(c => c.action_taken === 'flagged').length,
+      sentiment: comments.length ? Math.round(100 * (comments.filter(c => c.sentiment === 'positive').length - comments.filter(c => c.sentiment === 'negative' || c.sentiment === 'spam').length) / comments.length) : 0,
+    };
+  }, [comments]);
+
+  const refreshNow = async () => {
+    if (!sbReady) { addToast('Connect Supabase first', 'error'); return; }
+    if (connections.length === 0) { addToast('Connect a social account in Settings → Social Accounts first', 'info'); return; }
+    setRefreshing(true);
+    try {
+      const r = await fetch('/api/comments-fetch', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          user_id: currentUser.id,
+          supabase_url: localStorage.getItem('eos-sb-url'),
+          supabase_key: localStorage.getItem('eos-sb-key'),
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        addToast('Refresh failed: ' + (data.error || 'unknown'), 'error');
+      } else {
+        addToast(`Fetched ${data.fetched} comments (${data.inserted} new)`, 'success');
+        await load();
+        if (autoMode && data.inserted > 0) await evaluateAll();
+      }
+    } catch (e) { addToast('Refresh error: ' + e.message, 'error'); }
+    setRefreshing(false);
+  };
+
+  const evaluateAll = async () => {
+    if (!sbReady) return;
+    const unrated = comments.filter(c => !c.sentiment).slice(0, 30);
+    if (unrated.length === 0) return;
+    setEvaluating(true);
+    try {
+      await fetch('/api/comments-evaluate', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          comment_ids: unrated.map(c => c.id),
+          workspace_id: wsId,
+          auto_apply: autoMode,
+          supabase_url: localStorage.getItem('eos-sb-url'),
+          supabase_key: localStorage.getItem('eos-sb-key'),
+        }),
+      });
+      addToast(`Evaluated ${unrated.length} comments` + (autoMode ? ' + auto-applied rules' : ''), 'success');
+      await load();
+    } catch (e) { addToast('Evaluation error: ' + e.message, 'error'); }
+    setEvaluating(false);
+  };
+
+  const moderate = async (commentId, action, replyTextArg) => {
+    try {
+      const r = await fetch('/api/comments-moderate', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          comment_id: commentId, action, reply_text: replyTextArg,
+          supabase_url: localStorage.getItem('eos-sb-url'),
+          supabase_key: localStorage.getItem('eos-sb-key'),
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) addToast(`${action} failed: ${data.error || 'unknown'}`, 'error');
+      else { addToast(`Comment ${data.action}`, 'success'); await load(); }
+    } catch (e) { addToast(e.message, 'error'); }
+  };
+
+  const submitReply = async () => {
+    if (!replyingTo || !replyText.trim()) return;
+    await moderate(replyingTo.id, 'reply', replyText.trim());
+    setReplyingTo(null); setReplyText('');
+  };
+
+  const saveRule = async (rule) => {
+    if (!sbReady) return;
+    const row = {...rule, workspace_id: wsId, user_id: currentUser?.id};
+    if (rule.id) await sb.update('comment_rules', rule.id, row);
+    else await sb.insert('comment_rules', row);
+    setEditingRule(null); setRuleEditorOpen(false);
+    addToast('Rule saved', 'success');
+    load();
+  };
+
+  const deleteRule = async (id) => {
+    await sb.delete('comment_rules', id);
+    load();
+    addToast('Rule deleted', 'info');
+  };
 
   return (
     <div className="view-enter">
       <div className="view-head">
-        <div><h1>Comment Monitor</h1><div className="sub">Auto-moderate comments across your connected accounts. Hide negativity, reply to questions, flag spam.</div></div>
+        <div>
+          <h1>Comment Monitor</h1>
+          <div className="sub">Auto-moderate live comments across your connected accounts. Hide negativity, reply to questions, flag spam.</div>
+        </div>
         <div style={{display:'flex',gap:'.5rem',alignItems:'center'}}>
           <label style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem .85rem',background:autoMode?'rgba(0,230,138,0.1)':'var(--glass)',border:'1px solid '+(autoMode?'rgba(0,230,138,0.3)':'var(--border)'),borderRadius:'var(--radius-lg)',cursor:'pointer'}}>
-            <input type="checkbox" checked={autoMode} onChange={e=>setAutoMode(e.target.checked)} style={{accentColor:'var(--green)'}} />
+            <input type="checkbox" checked={autoMode} onChange={e=>setAutoMode(e.target.checked)} style={{accentColor:'var(--green)'}}/>
             <span style={{fontWeight:600,fontSize:'.85rem'}}>Auto-mod {autoMode?'ON':'OFF'}</span>
           </label>
-          <button className="btn btn-primary btn-sm" onClick={() => addToast('Refreshed: 4 new comments processed','success')}>Refresh Now</button>
+          <button className="btn btn-ghost btn-sm" disabled={evaluating || !comments.length} onClick={evaluateAll}>{evaluating ? '⚡ Evaluating…' : '🧠 Re-evaluate'}</button>
+          <button className="btn btn-primary btn-sm" disabled={refreshing} onClick={refreshNow}>{refreshing ? '⚡ Fetching…' : 'Refresh Now'}</button>
         </div>
       </div>
 
+      {connections.length === 0 && (
+        <div className="card" style={{marginBottom:'1.25rem',border:'1px solid var(--yellow-glow-strong)',background:'rgba(255,214,10,0.04)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'1rem'}}>
+            <div style={{fontSize:'1.5rem'}}>🔗</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:800}}>Connect a social account to start moderating</div>
+              <div style={{fontSize:'.82rem',color:'var(--text-muted)'}}>Comment Monitor uses your Facebook / Instagram / YouTube / LinkedIn OAuth tokens to fetch + moderate comments.</div>
+            </div>
+            <button className="btn btn-primary" onClick={() => setView('settings')}>Open Settings</button>
+          </div>
+        </div>
+      )}
+
       <div className="stats-grid" style={{marginBottom:'1.25rem'}}>
-        <div className="stat-card"><div className="label">Hidden Today</div><div className="value">12</div><div className="delta">Across 3 platforms</div></div>
-        <div className="stat-card"><div className="label">Auto-Replied</div><div className="value">7</div><div className="delta">Avg response: 2 min</div></div>
-        <div className="stat-card"><div className="label">Flagged for Review</div><div className="value">3</div><div className="delta down">Needs your attention</div></div>
-        <div className="stat-card"><div className="label">Sentiment Score</div><div className="value">+87</div><div className="delta">Mostly positive</div></div>
+        <div className="stat-card"><div className="label">Hidden Today</div><div className="value">{stats.hidden}</div><div className="delta">Across {connections.length} platforms</div></div>
+        <div className="stat-card"><div className="label">Auto-Replied</div><div className="value">{stats.replied}</div><div className="delta">via rules engine</div></div>
+        <div className="stat-card"><div className="label">Flagged</div><div className="value">{stats.flagged}</div><div className="delta down">Needs your review</div></div>
+        <div className="stat-card"><div className="label">Sentiment Score</div><div className="value">{stats.sentiment >= 0 ? '+' : ''}{stats.sentiment}</div><div className="delta">{stats.sentiment > 50 ? 'Mostly positive' : stats.sentiment < -10 ? 'Mostly negative' : 'Mixed'}</div></div>
       </div>
 
       <div className="grid-2" style={{gridTemplateColumns:'1.5fr 1fr'}}>
         {/* RECENT COMMENTS */}
         <div className="card">
-          <div className="card-head"><h3>Recent Comments</h3><span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)'}}>Last 24h</span></div>
+          <div className="card-head"><h3>Recent Comments</h3><span style={{fontFamily:'var(--mono)',fontSize:'.7rem',color:'var(--text-dim)'}}>{comments.length} loaded</span></div>
+          {comments.length === 0 && (
+            <div style={{padding:'2rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.85rem'}}>
+              No comments yet. {connections.length > 0 ? 'Click Refresh Now to fetch from connected platforms.' : 'Connect a platform first.'}
+            </div>
+          )}
           <div style={{display:'flex',flexDirection:'column',gap:'.5rem'}}>
-            {recentComments.map(c => (
+            {comments.map(c => (
               <div key={c.id} style={{padding:'.75rem 1rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)',borderLeft:`3px solid ${sentimentColor(c.sentiment)}`}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.4rem'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.4rem',gap:'.5rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap'}}>
                     <span className={`platform-badge ${c.platform}`} style={{fontSize:'.6rem',padding:'.1rem .35rem'}}>{c.platform.toUpperCase()}</span>
-                    <span style={{fontWeight:600,fontSize:'.82rem'}}>{c.user}</span>
-                    <span style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-dim)'}}>{c.time}</span>
+                    <span style={{fontWeight:600,fontSize:'.82rem'}}>{c.author || 'Unknown'}</span>
+                    {c.sentiment && <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',padding:'.12rem .4rem',background:`color-mix(in srgb, ${sentimentColor(c.sentiment)} 18%, transparent)`,color:sentimentColor(c.sentiment),borderRadius:4,textTransform:'uppercase'}}>{c.sentiment}</span>}
+                    {c.intent && c.intent !== 'other' && <span style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)'}}>{c.intent}</span>}
+                    <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',color:'var(--text-dim)'}}>{relTime(c.posted_at || c.fetched_at)}</span>
                   </div>
-                  <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',padding:'.15rem .45rem',background:`color-mix(in srgb, ${actionColor(c.action)} 15%, transparent)`,color:actionColor(c.action),borderRadius:999,textTransform:'uppercase',letterSpacing:'.05em'}}>{c.action}</span>
+                  {c.action_taken && c.action_taken !== 'none' && (
+                    <span style={{fontFamily:'var(--mono)',fontSize:'.62rem',padding:'.15rem .45rem',background:`color-mix(in srgb, ${actionColor(c.action_taken)} 15%, transparent)`,color:actionColor(c.action_taken),borderRadius:999,textTransform:'uppercase'}}>{c.action_taken}</span>
+                  )}
                 </div>
-                <div style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:'.35rem'}}>"{c.text}"</div>
-                <div style={{display:'flex',gap:'.35rem',flexWrap:'wrap'}}>
-                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} onClick={() => addToast(`Comment from ${c.user} unhidden`,'info')}>Undo</button>
-                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} onClick={() => addToast(`Replied to ${c.user}`,'success')}>Reply</button>
-                  <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem',color:'var(--red)'}} onClick={() => addToast(`Comment deleted permanently`,'error')}>Delete</button>
-                </div>
+                <div style={{fontSize:'.85rem',color:'var(--text-muted)',marginBottom:'.4rem'}}>"{c.text}"</div>
+                {replyingTo?.id === c.id ? (
+                  <div style={{display:'flex',gap:'.35rem'}}>
+                    <input className="input" style={{flex:1,fontSize:'.78rem'}} placeholder="Reply text…" autoFocus value={replyText} onChange={e => setReplyText(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitReply()}/>
+                    <button className="btn btn-primary btn-sm" onClick={submitReply}>Send</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => {setReplyingTo(null); setReplyText('');}}>×</button>
+                  </div>
+                ) : (
+                  <div style={{display:'flex',gap:'.35rem',flexWrap:'wrap'}}>
+                    <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} disabled={c.action_taken === 'hidden'} onClick={() => moderate(c.id, 'hide')}>Hide</button>
+                    <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} onClick={() => {setReplyingTo(c); setReplyText('');}}>Reply</button>
+                    <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem'}} onClick={() => moderate(c.id, 'flag')}>Flag</button>
+                    <button className="btn btn-ghost btn-sm" style={{fontSize:'.65rem',padding:'.2rem .5rem',color:'var(--red)'}} onClick={() => { if(confirm('Delete this comment from the platform?')) moderate(c.id, 'delete'); }}>Delete</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Connections + Rules */}
+        {/* RIGHT: connected platforms + rules */}
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
           <div className="card">
-            <div className="card-head"><h3>Platform Connections</h3></div>
-            {platforms.map(p => (
-              <div key={p.key} style={{padding:'.75rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.5rem',border:'1px solid var(--glass-border)'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.25rem'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
-                    <span style={{fontSize:'1.1rem'}}>{p.icon}</span>
-                    <span style={{fontWeight:700,fontSize:'.88rem'}}>{p.name}</span>
-                  </div>
-                  <button className={`btn btn-sm ${p.status==='available'?'btn-ghost':'btn-ghost'}`} disabled={!p.supported} style={{fontSize:'.7rem',padding:'.3rem .6rem',opacity:p.supported?1:.5}}>
-                    {p.status==='available'?'Connect':p.status==='limited'?'Limited':'Paid only'}
-                  </button>
+            <div className="card-head"><h3>Connected Platforms</h3><button className="btn btn-ghost btn-sm" onClick={() => setView('settings')}>+ Manage</button></div>
+            {connections.length === 0 && <div style={{padding:'1rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.85rem'}}>No social accounts connected.</div>}
+            {connections.map(c => (
+              <div key={c.id} style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.55rem .65rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.4rem'}}>
+                <span style={{fontSize:'1.1rem'}}>{({facebook:'📘',instagram:'📷',youtube:'▶️',linkedin:'💼',tiktok:'🎵',twitter:'𝕏'})[c.platform] || '🔗'}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:'.82rem',textTransform:'capitalize'}}>{c.platform}</div>
+                  {c.username && <div style={{fontSize:'.7rem',color:'var(--text-dim)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>@{c.username}</div>}
                 </div>
-                <div style={{fontSize:'.72rem',color:'var(--text-dim)',marginBottom:'.25rem'}}>{p.desc}</div>
-                <div style={{fontFamily:'var(--mono)',fontSize:'.6rem',color:'var(--text-dim)'}}>Permission: {p.perm}</div>
+                <span style={{fontSize:'.6rem',padding:'.15rem .35rem',background:'rgba(0,230,138,0.15)',color:'var(--green)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>● Live</span>
               </div>
             ))}
-            <div style={{padding:'.6rem .75rem',background:'rgba(255,214,10,0.05)',border:'1px solid rgba(255,214,10,0.2)',borderRadius:'var(--radius-lg)',fontSize:'.75rem',color:'var(--text-muted)',marginTop:'.5rem'}}>
-              💡 OAuth integrations require Meta Developer app approval (~2-4 weeks). Once approved, click "Connect" to authorize. Until then, this view shows what auto-mod will do once live.
-            </div>
           </div>
 
           <div className="card">
             <div className="card-head"><h3>Auto-Mod Rules</h3>
-              <button className="btn btn-ghost btn-sm" style={{fontSize:'.7rem',padding:'.25rem .5rem'}} onClick={() => addToast('Add rule modal coming','info')}>+ Add</button>
+              <button className="btn btn-ghost btn-sm" style={{fontSize:'.7rem',padding:'.25rem .5rem'}} onClick={() => {setEditingRule({name:'', match_type:'keyword', match_value:'', action:'hide', enabled:true, priority:0, reply_template:''}); setRuleEditorOpen(true);}}>+ Add Rule</button>
             </div>
-            {filterRules.map(r => (
+            {rules.length === 0 && <div style={{padding:'1rem',textAlign:'center',color:'var(--text-dim)',fontSize:'.82rem'}}>No rules yet. Add one above to start auto-moderating.</div>}
+            {rules.map(r => (
               <div key={r.id} style={{padding:'.65rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',marginBottom:'.4rem',border:'1px solid var(--glass-border)'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.3rem'}}>
-                  <span style={{fontFamily:'var(--mono)',fontSize:'.65rem',padding:'.15rem .4rem',background:r.type==='hide'?'rgba(255,59,92,0.15)':r.type==='reply'?'rgba(78,168,255,0.15)':'rgba(255,140,0,0.15)',color:r.type==='hide'?'var(--red)':r.type==='reply'?'var(--blue)':'var(--amber)',borderRadius:'var(--radius)',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:700}}>{r.type}</span>
-                  <input type="checkbox" checked={r.enabled} onChange={e => setFilterRules(prev => prev.map(x => x.id===r.id?{...x,enabled:e.target.checked}:x))} style={{accentColor:'var(--yellow)'}} />
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.3rem',gap:'.4rem'}}>
+                  <div style={{display:'flex',gap:'.35rem',alignItems:'center'}}>
+                    <span style={{fontFamily:'var(--mono)',fontSize:'.6rem',padding:'.15rem .4rem',background: r.action==='hide'?'rgba(255,59,92,0.15)':r.action==='reply'?'rgba(78,168,255,0.15)':r.action==='delete'?'rgba(255,59,92,0.15)':'rgba(255,140,0,0.15)',color: r.action==='hide'||r.action==='delete'?'var(--red)':r.action==='reply'?'var(--blue)':'var(--amber)',borderRadius:4,textTransform:'uppercase',fontWeight:700}}>{r.action}</span>
+                    <strong style={{fontSize:'.78rem'}}>{r.name}</strong>
+                  </div>
+                  <div style={{display:'flex',gap:'.25rem',alignItems:'center'}}>
+                    <input type="checkbox" checked={r.enabled} onChange={async (e) => { await sb.update('comment_rules', r.id, {enabled: e.target.checked}); load(); }} style={{accentColor:'var(--yellow)'}}/>
+                    <button onClick={() => {setEditingRule(r); setRuleEditorOpen(true);}} style={{background:'none',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'.7rem'}}>edit</button>
+                    <button onClick={() => deleteRule(r.id)} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:'.9rem'}}>×</button>
+                  </div>
                 </div>
-                <div style={{fontSize:'.78rem',marginBottom:'.2rem'}}>If <strong>{r.match}</strong> matches: <code style={{padding:'.1rem .3rem',background:'rgba(255,255,255,0.05)',borderRadius:3,fontSize:'.72rem'}}>{r.value}</code></div>
-                {r.reply && <div style={{fontSize:'.72rem',color:'var(--text-dim)',fontStyle:'italic'}}>Reply: "{r.reply}"</div>}
+                <div style={{fontSize:'.72rem',color:'var(--text-muted)'}}>If <strong>{r.match_type}</strong> matches <code style={{padding:'.05rem .25rem',background:'rgba(255,255,255,0.05)',borderRadius:3}}>{r.match_value}</code></div>
+                {r.reply_template && <div style={{fontSize:'.7rem',color:'var(--text-dim)',fontStyle:'italic',marginTop:'.2rem'}}>Reply: "{r.reply_template}"</div>}
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      {ruleEditorOpen && (
+        <RuleEditor rule={editingRule} onSave={saveRule} onClose={() => {setRuleEditorOpen(false); setEditingRule(null);}}/>
+      )}
     </div>
   );
+}
+
+function RuleEditor({rule, onSave, onClose}) {
+  const [form, setForm] = useState(rule);
+  const u = (k,v) => setForm(p => ({...p,[k]:v}));
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',backdropFilter:'blur(8px)',zIndex:500,display:'grid',placeItems:'center',padding:'2rem'}} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{width:'min(520px,96vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:14,padding:'1.5rem'}}>
+        <h2 style={{margin:'0 0 1rem'}}>{form.id ? 'Edit Rule' : 'New Auto-Mod Rule'}</h2>
+        <label className="field"><span className="lbl">Rule name</span><input className="input" value={form.name} onChange={e => u('name', e.target.value)} placeholder="e.g., Hide spam links"/></label>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem',marginBottom:'.5rem'}}>
+          <label className="field"><span className="lbl">Match type</span>
+            <select className="input" value={form.match_type} onChange={e => u('match_type', e.target.value)}>
+              <option value="keyword">Keyword (case-insensitive)</option>
+              <option value="regex">Regex pattern</option>
+              <option value="sentiment">Sentiment (positive/negative/spam)</option>
+              <option value="intent">Intent (question/complaint/sale/etc)</option>
+            </select>
+          </label>
+          <label className="field"><span className="lbl">Action</span>
+            <select className="input" value={form.action} onChange={e => u('action', e.target.value)}>
+              <option value="hide">Hide</option>
+              <option value="delete">Delete</option>
+              <option value="reply">Auto-Reply</option>
+              <option value="flag">Flag for review</option>
+            </select>
+          </label>
+        </div>
+        <label className="field"><span className="lbl">Match value</span><input className="input" value={form.match_value} onChange={e => u('match_value', e.target.value)} placeholder={form.match_type === 'sentiment' ? 'e.g. negative' : form.match_type === 'intent' ? 'e.g. spam' : 'e.g. crypto, free money'}/></label>
+        {form.action === 'reply' && (
+          <label className="field"><span className="lbl">Reply template</span><textarea className="input" rows={3} value={form.reply_template || ''} onChange={e => u('reply_template', e.target.value)} placeholder="Thanks for asking! DM me for details."/></label>
+        )}
+        <label className="field"><span className="lbl">Priority (higher runs first)</span><input className="input" type="number" value={form.priority || 0} onChange={e => u('priority', parseInt(e.target.value)||0)}/></label>
+        <div style={{display:'flex',gap:'.5rem',marginTop:'1rem'}}>
+          <button className="btn btn-ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
+          <button className="btn btn-primary" disabled={!form.name || !form.match_value} onClick={() => onSave(form)} style={{flex:2}}>{form.id ? 'Save' : 'Create Rule'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function relTime(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
 }
 
 /* ============================================================
@@ -6959,7 +7273,7 @@ const WORKFLOW_TEMPLATES = [
 ];
 
 function WorkflowsView() {
-  const {addToast} = useApp();
+  const {addToast, currentProfile, setView} = useApp();
   const [selected, setSelected] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [inputs, setInputs] = useState({});
@@ -7014,19 +7328,25 @@ function WorkflowsView() {
     if (payloadInput.collaborators) payloadInput.collaborators = parseInt(payloadInput.collaborators) || 3;
 
     try {
-      const r = await fetch('/api/run-workflow', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          template_id: selected.id,
-          input: payloadInput,
-          workspace_id: sb?.getWorkspaceId?.() || null,
-          supabase_url: sbUrl,
-          supabase_key: sbKey,
-        })
-      });
-      const data = await r.json();
-      if (!r.ok || !data.ok) {
+      const data = await withQuota(
+        {metric:'workflow', plan: currentProfile?.plan || 'free', workspaceId: sb?.getWorkspaceId?.() || null, addToast, onQuotaExceeded: () => setView('pricing')},
+        async () => {
+          const r = await fetch('/api/run-workflow', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              template_id: selected.id,
+              input: payloadInput,
+              workspace_id: sb?.getWorkspaceId?.() || null,
+              supabase_url: sbUrl,
+              supabase_key: sbKey,
+            })
+          });
+          return await r.json();
+        }
+      );
+      if (!data) { setRunning(false); setSteps(prev => prev.map(s => s.status === 'pending' || s.status === 'running' ? {...s, status:'error'} : s)); return; }
+      if (!data.ok) {
         addToast('Workflow failed: ' + (data.error || 'unknown'), 'error');
         setSteps(prev => prev.map(s => s.status === 'pending' || s.status === 'running' ? {...s, status:'error'} : s));
       } else {
@@ -7163,7 +7483,7 @@ function WorkflowsView() {
    BLOG BUILDER — long-form post generator with hybrid publish
    ============================================================ */
 function BlogBuilderView() {
-  const {addToast} = useApp();
+  const {addToast, currentProfile, setView} = useApp();
   const [source, setSource] = useState('topic');
   const [topic, setTopic] = useState('');
   const [strategyId, setStrategyId] = useState('');
@@ -7223,26 +7543,32 @@ function BlogBuilderView() {
     }
 
     try {
-      const r = await fetch('/api/generate-blog', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          topic: strategyTopic,
-          strategy: strategyText,
-          seo_keyword: seoKeyword,
-          word_count: parseInt(wordCount) || 1500,
-          tone,
-          internal_links: internalLinks.split('\n').map(s => s.trim()).filter(Boolean),
-          image_count: parseInt(imageCount) || 0,
-          save: true,
-          workspace_id: sb?.getWorkspaceId?.() || null,
-          strategy_id: source === 'strategy' ? strategyId : null,
-          supabase_url: sbUrl,
-          supabase_key: sbKey,
-        })
-      });
-      const data = await r.json();
-      if (!r.ok || !data.ok) {
+      const data = await withQuota(
+        {metric:'blog', plan: currentProfile?.plan || 'free', workspaceId: sb?.getWorkspaceId?.() || null, addToast, onQuotaExceeded: () => setView('pricing')},
+        async () => {
+          const r = await fetch('/api/generate-blog', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              topic: strategyTopic,
+              strategy: strategyText,
+              seo_keyword: seoKeyword,
+              word_count: parseInt(wordCount) || 1500,
+              tone,
+              internal_links: internalLinks.split('\n').map(s => s.trim()).filter(Boolean),
+              image_count: parseInt(imageCount) || 0,
+              save: true,
+              workspace_id: sb?.getWorkspaceId?.() || null,
+              strategy_id: source === 'strategy' ? strategyId : null,
+              supabase_url: sbUrl,
+              supabase_key: sbKey,
+            })
+          });
+          return await r.json();
+        }
+      );
+      if (!data) { setGenerating(false); return; }
+      if (!data.ok) {
         addToast('Blog generation failed: ' + (data.error || 'unknown'), 'error');
       } else {
         setResult(data);
@@ -7775,6 +8101,268 @@ function PlanPicker() {
 }
 
 /* ============================================================
+   PRICING PAGE — full-page replacement for the modal PlanPicker.
+   Shown post-signup. Annual toggle = 2 months free (10x monthly price).
+   Custom / Enterprise → SalesContactForm with Calendly embed.
+   ============================================================ */
+const PRICING_PLANS = [
+  {id:'free', name:'Free', monthly:0, tagline:'Free forever', desc:'Try the Strategy Engine and see your first Brain Score.', cta:'Continue Free',
+   features:['5 strategies / month','Brain Score (v0)','Strategy Vault (last 10)','1 brand workspace','Single-screen recording','Watermark on exports'], highlighted:false},
+  {id:'creator', name:'Creator', monthly:19, tagline:'For solo creators publishing 4+ pieces/week', desc:'Everything you need to ship daily.', cta:'Start 14-Day Trial',
+   features:['Unlimited strategies (powered by Claude)','All 46 mega prompts','Strategy Vault (unlimited)','Multi-screen + teleprompter','Workflows + Blog Builder','Auto-Edit + Asset Library bundled','PDF export, no watermark'], highlighted:false},
+  {id:'pro', name:'Pro', monthly:49, tagline:'For brands running campaigns + collaborator networks', desc:'Add team, native publishing, and the campaign engine.', cta:'Start 14-Day Trial',
+   features:['Everything in Creator, plus:','Up to 3 brand workspaces','Native blog publish (WP + Ghost)','Collaboration packages (unlimited)','Email distribution via Resend','Lead Magnet generator','Comment Monitor (FB/IG/YT/LinkedIn)','Hashtag Intel + Competitor Spy','5 team seats · Priority support'], highlighted:true},
+  {id:'enterprise', name:'Enterprise', monthly:null, tagline:'Agencies, multi-brand operators, regulated industries', desc:'Custom contract. Dedicated CSM. SOC 2 / HIPAA available.', cta:'Talk to Sales',
+   features:['Everything in Pro, plus:','Unlimited workspaces + seats','Dedicated Brain Score model','Per-niche fine-tuning','White-label option','SOC 2 / HIPAA compliance','Dedicated CSM + SLA','Custom integrations + webhooks','Onboarding + training'], highlighted:false},
+];
+
+function PricingPageView() {
+  const {addToast, currentUser, currentProfile, setView, setAuthGateOpen} = useApp();
+  const [interval, setInterval] = useState('annual');
+  const [busy, setBusy] = useState(null);
+  const [salesPlan, setSalesPlan] = useState(null);
+
+  const priceFor = (p) => {
+    if (p.monthly === null) return null;
+    if (p.monthly === 0) return 0;
+    return interval === 'annual' ? p.monthly * 10 : p.monthly;
+  };
+  const priceUnit = interval === 'annual' ? '/yr' : '/mo';
+  const annualSavings = (p) => p.monthly > 0 ? (p.monthly * 12) - (p.monthly * 10) : 0;
+
+  const pickPlan = async (p) => {
+    if (!currentUser) { setAuthGateOpen(true); return; }
+    if (p.id === 'free') {
+      const sb = window.SupabaseClient;
+      if (sb && sb.isReady() && currentProfile?.id) {
+        await sb.update('profiles', currentProfile.id, {plan:'free', updated_at: new Date().toISOString()});
+      }
+      addToast('Free plan active — start creating!', 'success');
+      setView('dashboard');
+      return;
+    }
+    if (p.id === 'enterprise') {
+      setSalesPlan(p);
+      return;
+    }
+    setBusy(p.id);
+    try {
+      const r = await fetch('/api/create-checkout', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          plan: p.id, interval: interval === 'annual' ? 'year' : 'month',
+          email: currentUser?.email,
+          profile_id: currentProfile?.id || currentUser?.id,
+          success_url: window.location.origin + '/?upgraded=1',
+          cancel_url:  window.location.origin + '/?canceled=1&view=pricing',
+        }),
+      });
+      const data = await r.json();
+      if (data.ok && data.url) { window.location.href = data.url; return; }
+      addToast(data.message || 'Free trial activated — Stripe coming soon', 'info');
+      const sb = window.SupabaseClient;
+      if (sb && sb.isReady() && currentProfile?.id) {
+        await sb.update('profiles', currentProfile.id, {plan: p.id, plan_status:'trialing'});
+      }
+      setView('dashboard');
+    } catch (e) {
+      addToast('Checkout error: ' + e.message, 'error');
+    }
+    setBusy(null);
+  };
+
+  if (salesPlan) {
+    return <SalesContactForm plan={salesPlan} onClose={() => setSalesPlan(null)} onCustomerSubmitted={() => { setSalesPlan(null); setView('dashboard'); }} />;
+  }
+
+  return (
+    <div className="view-enter" style={{maxWidth:1280,margin:'0 auto',padding:'2rem 1rem'}}>
+      <div style={{textAlign:'center',marginBottom:'2.5rem'}}>
+        <div style={{fontFamily:'var(--mono)',fontSize:'.7rem',letterSpacing:'.18em',color:'var(--text-muted)',textTransform:'uppercase',marginBottom:'.5rem'}}>● STEP 2 OF 2 — PICK YOUR PLAN</div>
+        <h1 style={{fontFamily:'var(--display)',fontSize:'clamp(2rem,5vw,3.2rem)',fontWeight:900,lineHeight:1.05,margin:'0 0 .5rem'}}>
+          Welcome{currentProfile?.first_name ? `, ${currentProfile.first_name}` : ''}. <span className="yellow">Pick a plan.</span>
+        </h1>
+        <p style={{fontSize:'1rem',color:'var(--text-muted)',margin:'0 auto',maxWidth:640}}>
+          Cancel anytime. 14-day free trial on paid plans. <strong style={{color:'var(--text)'}}>Annual saves you 2 months</strong> (16.7% off).
+        </p>
+
+        <div style={{display:'inline-flex',gap:0,marginTop:'1.5rem',background:'var(--glass)',borderRadius:10,padding:'.25rem',border:'1px solid var(--border)'}}>
+          <button onClick={() => setInterval('monthly')}
+            style={{padding:'.55rem 1.4rem',background: interval==='monthly' ? 'var(--yellow)' : 'transparent',color: interval==='monthly' ? '#0A0A14' : 'var(--text-muted)',border:'none',borderRadius:7,fontWeight:700,fontSize:'.85rem',cursor:'pointer'}}>Monthly</button>
+          <button onClick={() => setInterval('annual')}
+            style={{padding:'.55rem 1.4rem',background: interval==='annual' ? 'var(--yellow)' : 'transparent',color: interval==='annual' ? '#0A0A14' : 'var(--text-muted)',border:'none',borderRadius:7,fontWeight:700,fontSize:'.85rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}>
+            Annual
+            <span style={{fontSize:'.6rem',padding:'.12rem .4rem',background: interval==='annual' ? 'rgba(0,0,0,0.15)' : 'var(--green)',color: interval==='annual' ? '#0A0A14' : '#0A0A14',borderRadius:4,fontFamily:'var(--mono)',fontWeight:800}}>2 months free</span>
+          </button>
+        </div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:'1rem',marginBottom:'2rem'}}>
+        {PRICING_PLANS.map(p => {
+          const price = priceFor(p);
+          return (
+            <div key={p.id} style={{padding:'1.5rem 1.25rem',borderRadius:14,border: p.highlighted ? '2px solid var(--yellow)' : '1px solid var(--border)',background: p.highlighted ? 'rgba(255,214,10,0.04)' : 'var(--glass)',position:'relative',display:'flex',flexDirection:'column',transition:'all .15s'}}>
+              {p.highlighted && <div style={{position:'absolute',top:-12,left:'50%',transform:'translateX(-50%)',padding:'.22rem .65rem',background:'var(--yellow)',color:'#0A0A14',borderRadius:5,fontSize:'.62rem',fontWeight:900,fontFamily:'var(--mono)',textTransform:'uppercase',letterSpacing:'.1em',boxShadow:'0 4px 12px rgba(255,214,10,0.4)'}}>Most popular</div>}
+              <div style={{fontWeight:700,fontSize:'.78rem',color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.1em'}}>{p.name}</div>
+              <div style={{margin:'.5rem 0 .25rem',fontFamily:'var(--display)',fontWeight:900,fontSize:'2.4rem',lineHeight:1}}>
+                {price === null ? 'Custom' : price === 0 ? '$0' : `$${price}`}
+                {price !== null && price > 0 && <span style={{fontSize:'.78rem',color:'var(--text-dim)',fontWeight:500}}>{priceUnit}</span>}
+              </div>
+              {price !== null && price > 0 && interval === 'annual' && (
+                <div style={{fontSize:'.7rem',color:'var(--green)',fontFamily:'var(--mono)',marginBottom:'.5rem'}}>You save ${annualSavings(p)}/yr</div>
+              )}
+              <div style={{fontSize:'.78rem',color:'var(--text-muted)',marginBottom:'1rem',minHeight:42}}>{p.desc}</div>
+              <ul style={{listStyle:'none',padding:0,margin:'0 0 1.25rem',display:'flex',flexDirection:'column',gap:'.45rem',flex:1}}>
+                {p.features.map((f,i) => (
+                  <li key={i} style={{fontSize:'.82rem',color:'var(--text)',display:'flex',gap:'.5rem',alignItems:'flex-start',lineHeight:1.4}}>
+                    <span style={{color:'var(--green)',flexShrink:0}}>✓</span>{f}
+                  </li>
+                ))}
+              </ul>
+              <button className={p.highlighted ? 'btn btn-primary' : 'btn btn-ghost'} disabled={busy === p.id} onClick={() => pickPlan(p)} style={{width:'100%',fontWeight:700,padding:'.75rem'}}>
+                {busy === p.id ? '⚡ Loading…' : p.cta}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text-dim)',fontSize:'.78rem'}}>
+        Need something different? <button onClick={() => setSalesPlan(PRICING_PLANS[3])} style={{background:'none',border:'none',color:'var(--yellow)',cursor:'pointer',fontWeight:700}}>Talk to sales</button> · 14-day free trial · Cancel anytime · ⚡ Powered by Claude AI
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SALES CONTACT FORM — Custom / Enterprise lead capture +
+   Calendly embed for the discovery call.
+   ============================================================ */
+function SalesContactForm({plan, onClose, onCustomerSubmitted}) {
+  const {addToast, currentUser, currentProfile} = useApp();
+  const [step, setStep] = useState('form'); // form | scheduler
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    name: currentProfile?.display_name || '',
+    email: currentUser?.email || '',
+    company: '',
+    role: '',
+    team_size: '1-5',
+    industry: '',
+    use_case: '',
+    budget: 'undisclosed',
+    timeline: '1-3 months',
+    notes: '',
+  });
+  const u = (k,v) => setForm(p => ({...p,[k]:v}));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.email || !form.company) { addToast('Fill the required fields', 'error'); return; }
+    setBusy(true);
+    try {
+      // Persist to subscribers table tagged as 'enterprise-lead' so sales can pull it
+      const sb = window.SupabaseClient;
+      if (sb && sb.isReady()) {
+        await sb.insert('subscribers', {
+          email: form.email,
+          name: form.name,
+          source: 'enterprise-lead',
+          tags: ['enterprise-lead', 'plan-' + (plan?.id || 'custom')],
+          metadata: form,
+        });
+      }
+      // Forward to a webhook if configured (n8n/zapier hooked into the sales inbox)
+      const webhook = (typeof window !== 'undefined' && window.SUPERNOVA_SALES_WEBHOOK) || null;
+      if (webhook) {
+        fetch(webhook, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({type:'enterprise_lead', plan: plan?.name, ...form})}).catch(()=>{});
+      }
+      addToast('Submitted — pick a meeting time below', 'success');
+      setStep('scheduler');
+    } catch (e2) {
+      addToast('Submit failed: ' + e2.message, 'error');
+    }
+    setBusy(false);
+  };
+
+  const calendlyUrl = (typeof window !== 'undefined' && window.SUPERNOVA_CALENDLY_URL)
+    || 'https://calendly.com/raraavismarketing/supernova-enterprise-discovery';
+
+  return (
+    <div className="view-enter" style={{maxWidth:920,margin:'0 auto',padding:'2rem 1rem'}}>
+      <button onClick={onClose} className="btn btn-ghost btn-sm" style={{marginBottom:'1rem'}}>← Back to pricing</button>
+
+      <div style={{textAlign:'center',marginBottom:'2rem'}}>
+        <div style={{fontFamily:'var(--mono)',fontSize:'.7rem',letterSpacing:'.18em',color:'var(--text-muted)',textTransform:'uppercase',marginBottom:'.5rem'}}>● {plan?.name?.toUpperCase() || 'CUSTOM'} INQUIRY</div>
+        <h1 style={{fontFamily:'var(--display)',fontSize:'clamp(1.6rem,4vw,2.4rem)',fontWeight:900,lineHeight:1.1,margin:'0 0 .5rem'}}>
+          {step === 'form' ? <>Tell us what you're <span className="yellow">building.</span></> : <><span className="yellow">Pick a time</span> for our discovery call.</>}
+        </h1>
+        <p style={{color:'var(--text-muted)',margin:0,fontSize:'.95rem'}}>
+          {step === 'form' ? 'A branch manager will reach out within 1 business day with a tailored proposal.' : 'Pick whatever works — your slot is held for 15 minutes after picking.'}
+        </p>
+      </div>
+
+      {step === 'form' && (
+        <form onSubmit={submit} className="card" style={{padding:'2rem'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem',marginBottom:'.75rem'}}>
+            <label className="field"><span className="lbl">Full name *</span><input className="input" value={form.name} onChange={e => u('name', e.target.value)} required/></label>
+            <label className="field"><span className="lbl">Work email *</span><input className="input" type="email" value={form.email} onChange={e => u('email', e.target.value)} required/></label>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem',marginBottom:'.75rem'}}>
+            <label className="field"><span className="lbl">Company *</span><input className="input" value={form.company} onChange={e => u('company', e.target.value)} required/></label>
+            <label className="field"><span className="lbl">Your role</span><input className="input" placeholder="VP Marketing, Founder, Head of Content…" value={form.role} onChange={e => u('role', e.target.value)}/></label>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.75rem',marginBottom:'.75rem'}}>
+            <label className="field"><span className="lbl">Team size</span>
+              <select className="input" value={form.team_size} onChange={e => u('team_size', e.target.value)}>
+                <option>1-5</option><option>6-25</option><option>26-100</option><option>101-500</option><option>500+</option>
+              </select>
+            </label>
+            <label className="field"><span className="lbl">Industry</span><input className="input" placeholder="SaaS, Agency, Healthcare…" value={form.industry} onChange={e => u('industry', e.target.value)}/></label>
+            <label className="field"><span className="lbl">Timeline</span>
+              <select className="input" value={form.timeline} onChange={e => u('timeline', e.target.value)}>
+                <option>Immediately</option><option>1-3 months</option><option>3-6 months</option><option>6+ months</option><option>Just exploring</option>
+              </select>
+            </label>
+          </div>
+          <label className="field" style={{marginBottom:'.75rem'}}><span className="lbl">What are you trying to accomplish?</span>
+            <textarea className="input" rows={4} placeholder="e.g., We publish 4 brands across 6 channels. Need workspace isolation, white-label, and SOC 2." value={form.use_case} onChange={e => u('use_case', e.target.value)} style={{fontFamily:'var(--body)'}}/>
+          </label>
+          <label className="field" style={{marginBottom:'1rem'}}><span className="lbl">Budget range</span>
+            <select className="input" value={form.budget} onChange={e => u('budget', e.target.value)}>
+              <option value="under-500">Under $500/mo</option>
+              <option value="500-2k">$500 – $2,000/mo</option>
+              <option value="2k-10k">$2,000 – $10,000/mo</option>
+              <option value="10k-plus">$10,000+/mo</option>
+              <option value="undisclosed">Prefer not to say</option>
+            </select>
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{width:'100%',padding:'.95rem',fontWeight:800}}>
+            {busy ? '⚡ Submitting…' : 'Submit & Schedule Call →'}
+          </button>
+        </form>
+      )}
+
+      {step === 'scheduler' && (
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          {/* Calendly inline widget. Auto-loads via their widget script. */}
+          <iframe
+            src={calendlyUrl + '?hide_event_type_details=1&hide_gdpr_banner=1&primary_color=FFD60A&text_color=F5F5F0&background_color=0C0C12&email=' + encodeURIComponent(form.email) + '&name=' + encodeURIComponent(form.name)}
+            style={{width:'100%',height:'780px',border:'none',background:'#0C0C12'}}
+            title="Schedule discovery call"
+          />
+          <div style={{padding:'1rem',background:'var(--glass)',borderTop:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div style={{fontSize:'.78rem',color:'var(--text-muted)'}}>After booking, you'll get a calendar invite + Zoom link.</div>
+            <button className="btn btn-ghost btn-sm" onClick={onCustomerSubmitted}>Skip for now → Dashboard</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    REFERRALS VIEW — unique link + share buttons + invite-by-email + stats
    ============================================================ */
 function ReferralsView() {
@@ -8081,6 +8669,217 @@ const STYLE_PACKS = [
 ];
 
 /* ============================================================
+   FFMPEG.WASM EXPORT — bake CSS-filter previews into MP4/WebM/GIF.
+   Translator + lazy loader + ExportModal.
+   ============================================================ */
+
+// Single shared ffmpeg instance (~25MB) — created on first export
+let __ffmpegInstance = null;
+let __ffmpegLoadPromise = null;
+async function getFfmpeg(onLog) {
+  if (__ffmpegInstance) return __ffmpegInstance;
+  if (__ffmpegLoadPromise) return __ffmpegLoadPromise;
+  __ffmpegLoadPromise = (async () => {
+    if (!window.FFmpegWASM || !window.FFmpegUtil) {
+      throw new Error('ffmpeg.wasm not loaded yet. Reload and try again.');
+    }
+    const {FFmpeg} = window.FFmpegWASM;
+    const ffmpeg = new FFmpeg();
+    if (onLog) ffmpeg.on('log', ({message}) => onLog(message));
+    const baseURL = 'https://unpkg.com/@ffmpeg/[email protected]/dist/umd';
+    await ffmpeg.load({
+      coreURL: `${baseURL}/ffmpeg-core.js`,
+      wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+    });
+    __ffmpegInstance = ffmpeg;
+    return ffmpeg;
+  })();
+  return __ffmpegLoadPromise;
+}
+
+// Translate a CSS `filter:` string into an ffmpeg `-vf` chain.
+// Returns null if filter is empty/null.
+function cssFilterToFfmpegVf(cssFilter) {
+  if (!cssFilter || !String(cssFilter).trim()) return null;
+  const eq = {};            // contrast/brightness/saturation/gamma collected together
+  const extras = [];        // hue, blur, sepia, grayscale chains
+  const re = /(\w+(?:-\w+)*)\(([^)]+)\)/g;
+  let m;
+  while ((m = re.exec(cssFilter)) !== null) {
+    const name = m[1].toLowerCase();
+    const val = m[2].trim();
+    const num = parseFloat(val);
+    switch (name) {
+      case 'contrast':   eq.contrast = num; break;                   // CSS 1.0 = ffmpeg 1.0
+      case 'saturate':   eq.saturation = num; break;                 // CSS 1.0 = ffmpeg 1.0
+      case 'brightness': eq.brightness = (num - 1).toFixed(3); break;// CSS 1.0 = ffmpeg 0; offset
+      case 'gamma':      eq.gamma = num; break;
+      case 'hue-rotate': extras.push(`hue=h=${parseFloat(val)}`); break;
+      case 'sepia':      extras.push(`colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131`); break;
+      case 'grayscale':  if (num >= 0.5) extras.push('hue=s=0'); break;
+      case 'invert':     if (num >= 0.5) extras.push('negate'); break;
+      case 'blur': {
+        const px = parseFloat(val) || 0;
+        if (px > 0) extras.push(`boxblur=${px.toFixed(2)}:${px.toFixed(2)}`);
+        break;
+      }
+      // ignore unknown filters silently
+    }
+  }
+  const eqParts = Object.entries(eq).map(([k,v]) => `${k}=${v}`);
+  const eqChain = eqParts.length ? `eq=${eqParts.join(':')}` : null;
+  const chain = [eqChain, ...extras].filter(Boolean).join(',');
+  return chain || null;
+}
+
+function ExportModal({open, inputBlob, cssFilter, onClose}) {
+  const {addToast} = useApp();
+  const [format, setFormat] = useState('mp4');
+  const [quality, setQuality] = useState('high');
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState('');
+  const [outputUrl, setOutputUrl] = useState(null);
+  const [logTail, setLogTail] = useState('');
+  const filterChain = cssFilterToFfmpegVf(cssFilter);
+
+  useEffect(() => {
+    if (!open) { setOutputUrl(null); setProgress(0); setPhase(''); }
+  }, [open]);
+
+  if (!open) return null;
+  if (!inputBlob) return null;
+
+  const start = async () => {
+    setBusy(true); setProgress(0); setOutputUrl(null);
+    try {
+      setPhase('Loading ffmpeg…');
+      const ffmpeg = await getFfmpeg(line => setLogTail(prev => (prev + '\n' + line).slice(-400)));
+      ffmpeg.on('progress', ({progress: p}) => setProgress(Math.min(100, Math.round(p * 100))));
+
+      setPhase('Writing input…');
+      const {fetchFile} = window.FFmpegUtil;
+      await ffmpeg.writeFile('input.webm', await fetchFile(inputBlob));
+
+      const args = ['-i', 'input.webm'];
+      let outName = 'output.mp4';
+      if (format === 'mp4') {
+        if (filterChain) args.push('-vf', filterChain);
+        const crf = quality === 'high' ? 20 : quality === 'medium' ? 23 : 28;
+        args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf),
+                  '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart',
+                  outName);
+      } else if (format === 'webm') {
+        if (filterChain) args.push('-vf', filterChain);
+        args.push('-c:v', 'libvpx-vp9', '-b:v', quality === 'high' ? '2M' : quality === 'medium' ? '1M' : '600k',
+                  '-c:a', 'libopus', 'output.webm');
+        outName = 'output.webm';
+      } else if (format === 'gif') {
+        const gifVf = (filterChain ? filterChain + ',' : '') + `fps=12,scale=${quality === 'high' ? 720 : quality === 'medium' ? 480 : 320}:-1:flags=lanczos`;
+        args.push('-vf', gifVf, '-loop', '0', 'output.gif');
+        outName = 'output.gif';
+      }
+
+      setPhase('Encoding…');
+      await ffmpeg.exec(args);
+
+      setPhase('Reading output…');
+      const data = await ffmpeg.readFile(outName);
+      const mime = format === 'mp4' ? 'video/mp4' : format === 'webm' ? 'video/webm' : 'image/gif';
+      const blob = new Blob([data.buffer], {type: mime});
+      setOutputUrl(URL.createObjectURL(blob));
+      addToast(`Export ready (${(blob.size/1024/1024).toFixed(1)} MB)`, 'success');
+      setProgress(100);
+      setPhase('Done');
+
+      // Clean up scratch files
+      try { await ffmpeg.deleteFile('input.webm'); await ffmpeg.deleteFile(outName); } catch(e) {}
+    } catch (e) {
+      addToast('Export failed: ' + e.message, 'error');
+      setPhase('Error');
+    }
+    setBusy(false);
+  };
+
+  const download = () => {
+    if (!outputUrl) return;
+    const a = document.createElement('a');
+    a.href = outputUrl;
+    a.download = `supernova-export-${Date.now()}.${format}`;
+    a.click();
+  };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.85)',backdropFilter:'blur(8px)',zIndex:600,display:'grid',placeItems:'center',padding:'2rem'}}>
+      <div style={{width:'min(640px,96vw)',background:'var(--bg-solid)',border:'1px solid var(--border-strong)',borderRadius:14,padding:'1.75rem',boxShadow:'0 30px 80px rgba(0,0,0,.6)'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+          <div>
+            <h2 style={{margin:'0 0 .2rem'}}>🎬 Export with effects baked in</h2>
+            <div style={{fontSize:'.78rem',color:'var(--text-muted)'}}>{filterChain ? `ffmpeg chain: ${filterChain}` : 'No filter applied — raw export'}</div>
+          </div>
+          <button onClick={onClose} disabled={busy} style={{background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',fontSize:'1.2rem'}}>×</button>
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.6rem',marginBottom:'1rem'}}>
+          <div>
+            <label style={{fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.25rem'}}>Format</label>
+            <select className="input" value={format} onChange={e => setFormat(e.target.value)} disabled={busy}>
+              <option value="mp4">MP4 (H.264 / AAC) — universal, upload-ready</option>
+              <option value="webm">WebM (VP9 / Opus) — web native</option>
+              <option value="gif">GIF — short loops</option>
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.25rem'}}>Quality</label>
+            <select className="input" value={quality} onChange={e => setQuality(e.target.value)} disabled={busy}>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low (smaller file)</option>
+            </select>
+          </div>
+        </div>
+
+        {!busy && !outputUrl && (
+          <button className="btn btn-primary" onClick={start} style={{width:'100%',padding:'.95rem',fontWeight:800}}>
+            ⚡ Render {format.toUpperCase()}
+          </button>
+        )}
+
+        {busy && (
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.4rem',fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--mono)'}}>
+              <span>{phase}</span><span>{progress}%</span>
+            </div>
+            <div style={{height:8,background:'var(--glass)',borderRadius:4,overflow:'hidden'}}>
+              <div style={{width:progress+'%',height:'100%',background:'linear-gradient(90deg,#FFD60A,#FF8C00)',transition:'width .15s'}}/>
+            </div>
+            <div style={{marginTop:'.5rem',fontFamily:'var(--mono)',fontSize:'.62rem',color:'var(--text-dim)',whiteSpace:'pre-wrap',maxHeight:80,overflowY:'auto'}}>{logTail}</div>
+          </div>
+        )}
+
+        {outputUrl && (
+          <div style={{marginTop:'1rem'}}>
+            {format === 'gif' ? (
+              <img src={outputUrl} style={{maxWidth:'100%',borderRadius:8}}/>
+            ) : (
+              <video src={outputUrl} controls style={{width:'100%',borderRadius:8,maxHeight:280}}/>
+            )}
+            <div style={{display:'flex',gap:'.5rem',marginTop:'.75rem'}}>
+              <button className="btn btn-ghost" onClick={() => {setOutputUrl(null); setProgress(0);}} style={{flex:1}}>↻ Re-render</button>
+              <button className="btn btn-primary" onClick={download} style={{flex:2}}>⬇️ Download</button>
+            </div>
+          </div>
+        )}
+
+        <div style={{marginTop:'1rem',padding:'.5rem',background:'var(--glass)',borderRadius:6,fontSize:'.62rem',color:'var(--text-dim)',fontFamily:'var(--mono)',textAlign:'center'}}>
+          ffmpeg.wasm runs entirely in your browser · no upload to a server
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    VOICEOVER PANEL — ElevenLabs TTS. Drop into EditorView or use standalone.
    ============================================================ */
 const TTS_VOICES = [
@@ -8095,7 +8894,7 @@ const TTS_VOICES = [
 ];
 
 function VoiceoverPanel() {
-  const {addToast, latestStrategy} = useApp();
+  const {addToast, latestStrategy, currentProfile, setView} = useApp();
   const [text, setText] = useState(() => latestStrategy?.output || '');
   const [voice, setVoice] = useState('rachel');
   const [stability, setStability] = useState(0.5);
@@ -8109,13 +8908,20 @@ function VoiceoverPanel() {
     if (text.length > 5000) { addToast('Max 5000 chars per chunk', 'error'); return; }
     setBusy(true); setAudioUrl(null);
     try {
-      const r = await fetch('/api/synthesize', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({text, voice_name: voice, stability, similarity_boost: similarity, style}),
-      });
-      const data = await r.json();
-      if (!r.ok || !data.ok) {
+      const sb = window.SupabaseClient;
+      const data = await withQuota(
+        {metric:'voiceover', plan: currentProfile?.plan || 'free', workspaceId: sb?.getWorkspaceId?.() || null, addToast, onQuotaExceeded: () => setView('pricing')},
+        async () => {
+          const r = await fetch('/api/synthesize', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({text, voice_name: voice, stability, similarity_boost: similarity, style}),
+          });
+          return await r.json();
+        }
+      );
+      if (!data) { setBusy(false); return; }
+      if (!data.ok) {
         addToast('Voiceover failed: ' + (data.error || 'unknown'), 'error');
       } else if (data.audio_base64) {
         const blob = b64toBlob(data.audio_base64, 'audio/mpeg');
@@ -8188,6 +8994,82 @@ function b64toBlob(b64, mime) {
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return new Blob([buf], {type: mime});
+}
+
+/* ============================================================
+   USAGE METER — per-metric bars on Dashboard. Reads usage_metrics for
+   the current YYYY-MM bucket; click a bar → opens pricing page.
+   ============================================================ */
+function UsageMeter() {
+  const {currentProfile, setView} = useApp();
+  const [metrics, setMetrics] = useState({});
+  const [loading, setLoading] = useState(true);
+  const plan = currentProfile?.plan || 'free';
+  const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
+
+  const period = useMemo(() => {
+    const d = new Date();
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2,'0')}`;
+  }, []);
+
+  const daysUntilReset = useMemo(() => {
+    const d = new Date();
+    const next = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+    return Math.ceil((next - d) / (24*60*60*1000));
+  }, []);
+
+  const load = useCallback(async () => {
+    const sb = window.SupabaseClient;
+    if (!sb || !sb.isReady()) { setLoading(false); return; }
+    const wsId = sb.getWorkspaceId();
+    if (!wsId) { setLoading(false); return; }
+    const rows = await sb.fetch('usage_metrics', {eq:{workspace_id: wsId, period}});
+    const map = {};
+    (rows || []).forEach(r => { map[r.metric] = r.count; });
+    setMetrics(map);
+    setLoading(false);
+  }, [period]);
+  useEffect(() => { load(); }, [load]);
+
+  const METRICS = [
+    {key:'strategy',   label:'Strategies'},
+    {key:'blog',       label:'Blog Posts'},
+    {key:'workflow',   label:'Workflows'},
+    {key:'image',      label:'AI Images'},
+    {key:'voiceover',  label:'Voiceovers'},
+    {key:'transcribe', label:'Transcriptions'},
+  ];
+
+  return (
+    <div className="card" style={{marginBottom:'1.25rem'}}>
+      <div className="card-head">
+        <h3 style={{display:'flex',alignItems:'center',gap:'.5rem'}}>📊 This Month's Usage <span style={{fontSize:'.6rem',padding:'.15rem .4rem',background:'var(--glass)',color:'var(--text-muted)',borderRadius:4,fontFamily:'var(--mono)',textTransform:'uppercase'}}>{plan}</span></h3>
+        <span style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>resets in {daysUntilReset}d</span>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:'.75rem'}}>
+        {METRICS.map(m => {
+          const used = metrics[m.key] || 0;
+          const limit = limits[m.key] || 0;
+          const pct = limit ? Math.min(100, (used / limit) * 100) : 0;
+          const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--yellow)' : 'var(--green)';
+          return (
+            <div key={m.key} onClick={() => setView('pricing')} style={{cursor:'pointer',padding:'.6rem .75rem',background:'var(--glass)',borderRadius:8,border:'1px solid var(--border)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:'.35rem'}}>
+                <span style={{fontSize:'.75rem',fontWeight:600,color:'var(--text-muted)'}}>{m.label}</span>
+                <span style={{fontSize:'.72rem',fontFamily:'var(--mono)',color:'var(--text)'}}>{loading ? '…' : `${used} / ${limit >= 9999 ? '∞' : limit}`}</span>
+              </div>
+              <div style={{height:5,background:'rgba(255,255,255,0.05)',borderRadius:3,overflow:'hidden'}}>
+                <div style={{width:pct+'%',height:'100%',background:color,transition:'width .25s'}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {plan === 'free' && (
+        <button className="btn btn-primary btn-sm" onClick={() => setView('pricing')} style={{width:'100%',marginTop:'.85rem'}}>⚡ Upgrade for unlimited</button>
+      )}
+    </div>
+  );
 }
 
 /* ============================================================
@@ -9193,6 +10075,7 @@ function ViewRouter() {
     case 'blog': return <BlogBuilderView />;
     case 'assets': return <AssetLibraryView />;
     case 'referrals': return <ReferralsView />;
+    case 'pricing': return <PricingPageView />;
     case 'comments': return <CommentMonitorView />;
     case 'email': return <EmailStudioView />;
     case 'campaigns': return <EmailCampaignsView />;
@@ -9520,13 +10403,31 @@ function App() {
     if (upgraded) {
       addToast('Welcome to your new plan! 🎉', 'success');
     }
+    // Surface OAuth error redirects (Supabase + provider). Both query and hash
+    // forms occur depending on the flow type.
+    const oauthErr = urlParams?.get('error') || urlParams?.get('error_code');
+    const oauthErrDesc = urlParams?.get('error_description');
+    let hashErr = null, hashErrDesc = null;
+    try {
+      if (typeof window !== 'undefined' && window.location.hash) {
+        const h = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        hashErr = h.get('error') || h.get('error_code');
+        hashErrDesc = h.get('error_description');
+      }
+    } catch(e) {}
+    const err = oauthErr || hashErr;
+    const errDesc = oauthErrDesc || hashErrDesc;
+    if (err) {
+      addToast('Sign-in failed: ' + (errDesc || err).replace(/\+/g, ' '), 'error');
+      setAuthGateOpen(true);
+    }
 
     if (queryView && ['terms','privacy','sms','email'].includes(queryView)) {
       setLegalTab(queryView);
       setView('legal');
     } else if (queryView === 'legal') {
       setView('legal');
-    } else if (queryView && ['workflows','blog','dashboard','create','pricing','referrals','assets'].includes(queryView)) {
+    } else if (queryView && ['workflows','blog','dashboard','create','pricing','referrals','assets','campaigns','livestream','comments'].includes(queryView)) {
       setView(queryView);
     }
     if (unsubscribeEmail) {

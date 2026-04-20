@@ -31,7 +31,7 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 |---|---|---|
 | Stripe subscriptions | ✅ | `/api/create-checkout` + `/api/stripe-webhook` (sync to subscriptions/profiles/plan_events) |
 | Plan upgrade / downgrade (self-service) | ✅ | `/api/stripe-portal` → Customer Portal link from user dropdown |
-| Usage metering (strategies/mo, blog posts/mo) | 🔴 | Counters per workspace; soft-throttle on free tier |
+| Usage metering (strategies/mo, blog posts/mo) | ✅ | `usage_metrics` table + `/api/usage-check` (check + atomic increment) + `withQuota` helper wraps all 5 AI callsites + `UsageMeter` on Dashboard |
 | Annual billing (20% off) | ✅ | PlanPicker has month/year toggle; price ID env vars |
 | Tax handling | 🟡 | Enable Stripe Tax in Dashboard — no code changes needed |
 | Invoicing | ✅ | Stripe-hosted invoices via Customer Portal |
@@ -65,11 +65,11 @@ What's required to take this from a single-tenant tool to a "plug in and ship" e
 | WordPress publish | ✅ | 🔴 | REST API + App Password |
 | Ghost publish | ✅ | 🔴 | Admin API + JWT |
 | Webhook (Zapier/n8n/Make) | ✅ | 🟡 | Outbound shipped; receive-webhook stub needed |
-| YouTube auto-post | ✅ | 🔴 | OAuth + Data API v3 resumable upload (`/api/social-post`) |
-| Instagram Graph API | ✅ | 🟡 | Reels container + publish (`/api/social-post`); Comment Monitor scaffold |
+| YouTube auto-post | ✅ | ✅ | OAuth + Data API v3 resumable upload + Comment Monitor live |
+| Instagram Graph API | ✅ | ✅ | Reels container + publish + Comment Monitor live (FB-linked Business account) |
 | TikTok Content Posting | ✅ | 🔴 | Direct Post API + PULL_FROM_URL (approval required by TikTok) |
-| Facebook Pages API | ✅ | 🟡 | Page video + photo posts; Comment Monitor scaffold |
-| LinkedIn Marketing API | ✅ | 🔴 | UGC Posts (text/image; video upload coming) |
+| Facebook Pages API | ✅ | ✅ | Page video + photo posts + Comment Monitor live |
+| LinkedIn Marketing API | ✅ | ✅ | UGC Posts + Comment Monitor live (URN-based fetch + reply/delete) |
 | X (Twitter) API v2 | ✅ | 🔴 | Tweets via OAuth 2.0 + write scope |
 | GoHighLevel CRM sync | 🔴 | 🔴 | Custom field push for lead-magnet captures |
 

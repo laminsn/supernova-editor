@@ -122,6 +122,36 @@ Live status anytime: `GET /api/health` → `{integrations_ready: "11/18", ...}`
 
 ---
 
+## Setting up Google ("Gmail") OAuth — exact steps
+
+The "Continue with Google" button on the sign-up modal silently does nothing if any of these three pieces are missing. Do all three:
+
+### 1. Create Google OAuth credentials
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create or select a project.
+2. **APIs & Services → OAuth consent screen** → External → fill in app name, support email, logo. Add scopes: `email`, `profile`, `openid`.
+3. **APIs & Services → Credentials** → Create credentials → OAuth client ID → **Web application**.
+4. Authorized JavaScript origins: `https://supernova-editor.vercel.app` (and `http://localhost:3000` for dev).
+5. **Authorized redirect URIs**: paste **`https://<your-project>.supabase.co/auth/v1/callback`** — this is Supabase's hosted callback, NOT our Vercel domain. You can find it in Supabase Dashboard → Authentication → Providers → Google → "Callback URL (for OAuth)".
+6. Save → copy the Client ID + Client Secret.
+
+### 2. Enable Google in Supabase
+1. Supabase Dashboard → **Authentication → Providers → Google** → toggle ON.
+2. Paste the Client ID + Client Secret from step 1.6 → Save.
+
+### 3. Set Site URL + redirect allow-list
+Supabase Dashboard → **Authentication → URL Configuration**:
+- **Site URL**: `https://supernova-editor.vercel.app` (no trailing slash)
+- **Redirect URLs** (comma-separated): `https://supernova-editor.vercel.app/, http://localhost:3000/, http://localhost:5173/`
+
+After all three are saved, the Continue with Google button will land you on the Google consent screen → redirect back to the app signed in. If misconfigured, the app now surfaces the actual error (e.g., `provider_not_found`, `redirect_uri_mismatch`) as a toast instead of silently failing.
+
+### Apple sign-in — same idea
+1. [developer.apple.com](https://developer.apple.com) → Certificates → Sign In with Apple → create Service ID, configure return URL = Supabase callback.
+2. Generate the JWT secret (10-min expiry rotation needed — Supabase has a built-in helper).
+3. Supabase Dashboard → Authentication → Providers → Apple → toggle ON, paste Service ID + Team ID + Key ID + Private Key.
+
+---
+
 ## TL;DR for the user
 
 > "What do I need to set up before I can use Supernova?"
