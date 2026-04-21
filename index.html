@@ -719,149 +719,22 @@ const I18N = {
   id:{dashboard:'Dasbor',create:'Buat',strategy:'Mesin',editor:'Editor',translate:'Terjemahkan',publish:'Terbitkan',analytics:'Analitik',settings:'Pengaturan',launchApp:'Buka',getStarted:'Mulai'},
 };
 
-const MOCK_CONTENT = [
-  {id:1,title:'Why Most AI Tools Fail Small Businesses',status:'published',type:'short',platforms:['ig','tt','yt'],views:48200,saves:2340,shares:890,date:'2052-03-10'},
-  {id:2,title:'The 5-Minute Automation That Replaced My VA',status:'published',type:'short',platforms:['ig','tt'],views:31500,saves:1890,shares:620,date:'2052-03-08'},
-  {id:3,title:'Building Your AI Army: Complete Guide',status:'published',type:'long',platforms:['yt','li'],views:92400,saves:5600,shares:2100,date:'2052-03-05'},
-  {id:4,title:'Stop Hiring. Start Deploying.',status:'approved',type:'short',platforms:['ig','tt','yt'],views:0,saves:0,shares:0,date:'2052-03-15'},
-  {id:5,title:'The Content Machine Framework',status:'review',type:'both',platforms:['ig','tt','yt','li'],views:0,saves:0,shares:0,date:'2052-03-18'},
-  {id:6,title:'Why Your CRM Is Actually an AI Agent',status:'draft',type:'short',platforms:['ig','tt'],views:0,saves:0,shares:0,date:'2052-03-20'},
-  {id:7,title:'From Zero to 46 Assets in One Session',status:'published',type:'short',platforms:['ig','tt','yt','li'],views:67800,saves:4200,shares:1560,date:'2052-02-28'},
-  {id:8,title:'The Reframe That Changed Everything',status:'published',type:'short',platforms:['ig','tt'],views:22100,saves:1100,shares:340,date:'2052-02-25'},
-  {id:9,title:'How I Built a 200-Agent Empire',status:'scheduled',type:'long',platforms:['yt','li'],views:0,saves:0,shares:0,date:'2052-03-22'},
-  {id:10,title:'Comment Keywords: The Growth Hack',status:'draft',type:'short',platforms:['ig','tt'],views:0,saves:0,shares:0,date:'2052-03-25'},
-];
+// Production: mock data removed 2026-04-21. All views now render from
+// Supabase queries only. Empty arrays preserve the variable bindings so
+// references like `.map`, `.filter`, `.length`, `.slice` yield empty
+// results (renders empty states in the UI instead of throwing).
+const MOCK_CONTENT = [];
+const ANALYTICS_30D = [];
+const ACTIVITY_FEED = [];
+const MOCK_TRACKS = [];
 
-const ANALYTICS_30D = Array.from({length:30},(_,i) => ({
-  day:`Mar ${i+1}`,
-  views:Math.floor(3000+Math.random()*8000+(i>20?4000:0)),
-  saves:Math.floor(100+Math.random()*400+(i>20?200:0)),
-  shares:Math.floor(30+Math.random()*150),
-  engagement:+(2+Math.random()*5).toFixed(1),
-}));
-
-const ACTIVITY_FEED = [
-  {text:'Short-form script approved — "Why Most AI Tools Fail"',time:'2h ago',color:'var(--green)'},
-  {text:'Carousel generated — 27 Ideogram images created',time:'4h ago',color:'var(--yellow)'},
-  {text:'Published to Instagram & TikTok — "5-Minute Automation"',time:'Yesterday',color:'var(--blue)'},
-  {text:'YouTube upload complete — "Building Your AI Army"',time:'2 days ago',color:'var(--red)'},
-  {text:'Neural impact score: 87/100 — high emotional resonance',time:'2 days ago',color:'var(--purple)'},
-  {text:'8 clips extracted from long-form — queued for posting',time:'3 days ago',color:'var(--magenta)'},
-  {text:'Email newsletter sent — 12,340 subscribers reached',time:'3 days ago',color:'var(--green)'},
-  {text:'GIF generated from "Reframe" clip — ready for email embed',time:'4 days ago',color:'var(--cyan)'},
-];
-
-const MOCK_TRACKS = [
-  {name:'Midnight Drive',artist:'SynthWave',duration:'2:34',genre:'Chill',bpm:95},
-  {name:'Rise & Grind',artist:'BeatLab',duration:'1:58',genre:'Upbeat',bpm:128},
-  {name:'Corporate Vision',artist:'AudioStock',duration:'3:12',genre:'Corporate',bpm:110},
-  {name:'Neon Pulse',artist:'ElectroProd',duration:'2:45',genre:'Cinematic',bpm:140},
-  {name:'Focus State',artist:'LoFi Collective',duration:'4:01',genre:'Chill',bpm:85},
-  {name:'Momentum',artist:'BeatLab',duration:'2:22',genre:'Upbeat',bpm:135},
-  {name:'Golden Hour',artist:'SynthWave',duration:'3:38',genre:'Cinematic',bpm:100},
-  {name:'Startup Energy',artist:'AudioStock',duration:'1:45',genre:'Corporate',bpm:120},
-];
-
-const MOCK_STRATEGY_OUTPUT = `RECOMMENDED HOOK
-Type: Redefinition
-"Most people think AI automation is about saving time. It's actually about making decisions you didn't know you were missing."
-Reason: Challenges the "time-saving" assumption. Creates an information gap — what decisions?
-
-HOOK VARIATIONS
-1. [Question] "What if the biggest cost in your business isn't money — it's the decisions you never made?"
-2. [Conditional] "If you're still doing your own research before every business decision, you've already lost 6 months."
-3. [Narrative] "Last Tuesday, my AI agent flagged a market shift 3 hours before my competitor noticed."
-
-CONTRARIAN TAKE
-"Everyone says 'AI replaces humans.' The truth: AI doesn't replace you — it reveals how many critical decisions you were never making in the first place."
-
-3 KEY POINTS
-1. Decision Velocity — AI agents process 10,000 data points while you read one email.
-2. The Invisible Bottleneck — Most businesses have 3-5 daily decisions that nobody makes.
-3. Compound Intelligence — AI handles decisions at speed; each informs the next.
-
-EMOTIONAL ARC
-Hook: Shock (redefining what they thought AI was for)
-Middle: Alarm (realizing what they've been missing)
-Close: Empowerment (they can fix this today)
-
-REFRAME LINE
-"You don't need AI to do your job faster. You need AI to do the job you didn't know existed."
-
-CTA KEYWORD: DECISIONS
-TARGET DURATION: 60-90 seconds
-PLATFORM PRIORITY: Instagram > TikTok > YouTube Shorts > LinkedIn`;
-
-const TELEPROMPTER_SCRIPT = [
-  {type:'beat',text:'CURIOSITY HOOK — 0-5s'},
-  {type:'line',text:'Most people think AI automation is about saving time.'},
-  {type:'line',text:"It's actually about making decisions you didn't know you were missing."},
-  {type:'beat',text:'BROAD TOPIC — 5-10s'},
-  {type:'line',text:"Let me show you the invisible bottleneck in every business."},
-  {type:'beat',text:'CONTRARIAN TAKE — 10-22s'},
-  {type:'line',text:"Everyone says AI replaces humans."},
-  {type:'line',text:"The truth? AI doesn't replace you."},
-  {type:'line',text:"It reveals how many critical decisions you were never making."},
-  {type:'beat',text:'CLEAR EXPLANATION — 22-55s'},
-  {type:'line',text:"Decision Velocity: AI processes 10,000 data points while you read one email."},
-  {type:'line',text:"The gap isn't efficiency — it's awareness."},
-  {type:'line',text:"Most businesses have 3-5 daily decisions nobody makes because nobody knows they exist."},
-  {type:'beat',text:'REHOOK — 55-60s'},
-  {type:'line',text:"But here's what most people miss..."},
-  {type:'beat',text:'REFRAME — 60-72s'},
-  {type:'line',text:"You don't need AI to do your job faster."},
-  {type:'line',text:"You need AI to do the job you didn't know existed."},
-  {type:'beat',text:'CTA — 72-90s'},
-  {type:'line',text:'Comment "DECISIONS" and I\'ll send you the full framework.'},
-];
-
-/* BRAIN REGIONS for Neural Impact Visualizer */
-const BRAIN_REGIONS = [
-  {id:'prefrontal',label:'Prefrontal Cortex',role:'Decision Making',score:92,color:'#FFD60A',cx:200,cy:80,r:45},
-  {id:'amygdala',label:'Amygdala',role:'Emotional Response',score:87,color:'#FF2D87',cx:180,cy:160,r:30},
-  {id:'hippocampus',label:'Hippocampus',role:'Memory Formation',score:78,color:'#4EA8FF',cx:220,cy:170,r:28},
-  {id:'temporal',label:'Temporal Lobe',role:'Language Processing',score:95,color:'#00E68A',cx:130,cy:150,r:35},
-  {id:'occipital',label:'Occipital Lobe',role:'Visual Processing',score:71,color:'#8B5CF6',cx:270,cy:150,r:32},
-  {id:'motor',label:'Motor Cortex',role:'Action Intent',score:65,color:'#FF8C00',cx:200,cy:50,r:25},
-];
-
-/* COLLABORATION DATA */
-const MOCK_COLLABORATORS = [
-  {id:1,name:'Maya Chen',handle:'@mayachen_creates',platform:'ig',timezone:'PST (UTC-8)',tier:'Gold',level:'Ambassador',photo:'M',email:'maya@creatorstudio.com',followers:'285K',engagement:4.2,posts:23,lastActive:'2h ago',status:'active',tags:['lifestyle','tech','AI']},
-  {id:2,name:'Jordan Williams',handle:'@jordanw.business',platform:'li',timezone:'EST (UTC-5)',tier:'Platinum',level:'Partner',photo:'J',email:'jordan@bizmindset.co',followers:'142K',engagement:6.8,posts:41,lastActive:'30m ago',status:'active',tags:['business','leadership']},
-  {id:3,name:'Aisha Patel',handle:'@aisha.growth',platform:'tt',timezone:'GMT (UTC+0)',tier:'Silver',level:'Influencer',photo:'A',email:'aisha@growthlab.io',followers:'520K',engagement:7.1,posts:15,lastActive:'1d ago',status:'active',tags:['marketing','growth']},
-  {id:4,name:'Carlos Rivera',handle:'@carlosrivera.ai',platform:'yt',timezone:'CST (UTC-6)',tier:'Gold',level:'Affiliate',photo:'C',email:'carlos@aireviews.net',followers:'98K',engagement:3.9,posts:8,lastActive:'5h ago',status:'invited',tags:['AI','reviews']},
-  {id:5,name:'Destiny Moore',handle:'@destinymoore',platform:'ig',timezone:'EST (UTC-5)',tier:'Bronze',level:'Influencer',photo:'D',email:'destiny@socialflow.com',followers:'67K',engagement:5.5,posts:3,lastActive:'3d ago',status:'active',tags:['lifestyle','wellness']},
-  {id:6,name:'Marcus Kim',handle:'@marcuskim.biz',platform:'fb',timezone:'JST (UTC+9)',tier:'Silver',level:'Ambassador',photo:'K',email:'marcus@bizkim.jp',followers:'34K',engagement:8.2,posts:19,lastActive:'12h ago',status:'active',tags:['business','Asia']},
-  {id:7,name:'Priya Sharma',handle:'@priya.automate',platform:'li',timezone:'GST (UTC+4)',tier:'Platinum',level:'Partner',photo:'P',email:'priya@automateflow.ae',followers:'210K',engagement:5.0,posts:37,lastActive:'45m ago',status:'active',tags:['automation','SaaS']},
-  {id:8,name:'Tyler Brooks',handle:'@tyler.hustle',platform:'tt',timezone:'MST (UTC-7)',tier:'Bronze',level:'Affiliate',photo:'T',email:'tyler@hustlehacks.co',followers:'155K',engagement:9.3,posts:0,lastActive:'Never',status:'invited',tags:['motivation','content']},
-];
-
-const MOCK_CAMPAIGNS = [
-  {id:1,name:'AI Tools Launch Sprint',status:'active',collaborators:[1,2,3,5],sent:3,total:4,posted:2,start:'Mar 15',end:'Mar 29'},
-  {id:2,name:'Content Machine Rollout',status:'draft',collaborators:[2,4,6,7],sent:0,total:4,posted:0,start:'Apr 1',end:'Apr 14'},
-  {id:3,name:'200-Agent Empire Promo',status:'completed',collaborators:[1,2,3,5,6,7],sent:6,total:6,posted:6,start:'Feb 15',end:'Mar 1'},
-];
-
-const MOCK_TEAMMATES = [
-  {id:1,name:'Lamin S. Ngobeh',email:'mr.ngobeh@gmail.com',role:'owner',photo:'L',status:'active',lastActive:'Now',published:247,tasks:412},
-  {id:2,name:'Sarah Mitchell',email:'sarah@raraavismarketing.com',role:'admin',photo:'S',status:'active',lastActive:'15m ago',published:89,tasks:156},
-  {id:3,name:'David Okafor',email:'david@raraavismarketing.com',role:'editor',photo:'D',status:'active',lastActive:'2h ago',published:63,tasks:98},
-  {id:4,name:'Emily Zhang',email:'emily@raraavismarketing.com',role:'contributor',photo:'E',status:'active',lastActive:'1d ago',published:0,tasks:34},
-  {id:5,name:'Alex Reyes',email:'alex@contractor.dev',role:'editor',photo:'A',status:'invited',lastActive:'Never',published:0,tasks:0},
-  {id:6,name:'Rachel Thompson',email:'rachel@analytics.co',role:'viewer',photo:'R',status:'deactivated',lastActive:'2w ago',published:0,tasks:12},
-];
-
-const TEAM_ACTIVITY = [
-  {user:'Sarah Mitchell',action:'Published "Why Most AI Tools Fail" to Instagram',time:'2h ago',type:'publish'},
-  {user:'David Okafor',action:'Edited script for "Content Machine Framework"',time:'4h ago',type:'edit'},
-  {user:'Emily Zhang',action:'Created draft "The Future of Prompt Engineering"',time:'6h ago',type:'create'},
-  {user:'Lamin S. Ngobeh',action:'Approved 3 content pieces for publishing',time:'8h ago',type:'approve'},
-  {user:'Sarah Mitchell',action:'Sent collaboration package to Maya Chen',time:'1d ago',type:'collab'},
-  {user:'David Okafor',action:'Generated carousel for "Stop Hiring. Start Deploying."',time:'1d ago',type:'create'},
-  {user:'Lamin S. Ngobeh',action:'Invited Alex Reyes as Editor',time:'2d ago',type:'team'},
-  {user:'Sarah Mitchell',action:'Scheduled 5 posts for next week',time:'2d ago',type:'schedule'},
-];
+const MOCK_STRATEGY_OUTPUT = '';
+const TELEPROMPTER_SCRIPT = [];
+const BRAIN_REGIONS = [];
+const MOCK_COLLABORATORS = [];
+const MOCK_CAMPAIGNS = [];
+const MOCK_TEAMMATES = [];
+const TEAM_ACTIVITY = [];
 
 const ROLE_PERMISSIONS = {
   sections:['Dashboard','Strategy Engine','Editor','Thumbnails','Collage','Content Library','Repurposer','Translate','Publish','Hashtag Intel','Analytics','Competitor Spy','Email Studio','Collaboration','Settings','Billing','Team Mgmt'],
@@ -1784,7 +1657,7 @@ function LandingPage() {
                 <li>Custom integrations + webhooks</li>
                 <li>Onboarding + training</li>
               </ul>
-              <button className="btn btn-ghost price-cta" onClick={() => window.location.href='mailto:lamin@raraavismarketing.com?subject=Supernova%20Enterprise'}>Contact Sales</button>
+              <button className="btn btn-ghost price-cta" onClick={() => window.location.href=`mailto:${SUPPORT_EMAIL}?subject=Supernova%20Enterprise`}>Contact Sales</button>
             </div>
           </div>
           <div style={{textAlign:'center',marginTop:'2rem',fontFamily:'var(--mono)',fontSize:'.78rem',color:'var(--text-dim)'}}>
@@ -1863,7 +1736,7 @@ function LandingPage() {
               <a href="?view=privacy" onClick={(e) => {e.preventDefault(); goToLegal('privacy');}}>Privacy Policy</a>
               <a href="?view=sms" onClick={(e) => {e.preventDefault(); goToLegal('sms');}}>SMS Terms (10DLC)</a>
               <a href="?view=email" onClick={(e) => {e.preventDefault(); goToLegal('email');}}>Email Terms</a>
-              <a href="mailto:support@raraavismarketing.com">Contact / Data Requests</a>
+              <a href={`mailto:${SUPPORT_EMAIL}`}>Contact / Data Requests</a>
             </div>
           </div>
           <div className="copy">
@@ -2033,7 +1906,11 @@ function Topbar() {
    DASHBOARD
    ============================================================ */
 function DashboardView() {
-  const {setView, addToast} = useApp();
+  const {setView, addToast, currentProfile, currentUser} = useApp();
+  const userFirstName = currentProfile?.first_name
+    || (currentProfile?.name || '').split(' ')[0]
+    || (currentUser?.email || '').split('@')[0]
+    || 'there';
   const [stats, setStats] = useState(null);
   const [activity, setActivity] = useState([]);
   const [pipeline, setPipeline] = useState({draft:0, review:0, approved:0, published:0});
@@ -2044,16 +1921,10 @@ function DashboardView() {
   const loadAll = useCallback(async () => {
     const sb = window.SupabaseClient;
     if (!sb || !sb.isReady()) {
-      // Mock fallback
-      const published = MOCK_CONTENT.filter(c => c.status === 'published');
-      setStats({total: 247, weekPublished: 18, totalViews30d: published.reduce((s,c) => s + c.views, 0), brainAvg: 87});
-      setActivity(ACTIVITY_FEED);
-      setPipeline({
-        draft: MOCK_CONTENT.filter(c=>c.status==='draft').length,
-        review: MOCK_CONTENT.filter(c=>c.status==='review').length,
-        approved: MOCK_CONTENT.filter(c=>c.status==='approved').length,
-        published: MOCK_CONTENT.filter(c=>c.status==='published').length,
-      });
+      // Supabase not connected — render empty state, no mock data.
+      setStats({total: 0, weekPublished: 0, totalViews30d: 0, brainAvg: null});
+      setActivity([]);
+      setPipeline({draft: 0, review: 0, approved: 0, published: 0});
       setIsLive(false);
       setLoading(false);
       setLastRefresh(new Date());
@@ -2100,7 +1971,7 @@ function DashboardView() {
       ...bp.slice(0,3).map(x => ({color:'var(--blue)', text: `Blog post: "${x.title}"${(x.published_to||[]).length ? ' · published to '+x.published_to.map(p=>p.target).join(', ') : ''}`, time: relativeTime(x.created_at), at: x.created_at})),
     ].sort((a,b) => (b.at || '').localeCompare(a.at || '')).slice(0, 10);
 
-    setActivity(events.length ? events : ACTIVITY_FEED);
+    setActivity(events);
     setIsLive(true);
     setLoading(false);
     setLastRefresh(new Date());
@@ -2122,14 +1993,11 @@ function DashboardView() {
         <div>
           <h1>Dashboard</h1>
           <div className="sub" style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
-            <span>Welcome back, Lamin. Your content machine at a glance.</span>
+            <span>Welcome back, {userFirstName}. Your content machine at a glance.</span>
             {isLive && (
               <span title={`Last refresh: ${lastRefresh ? lastRefresh.toLocaleTimeString() : '—'}`} style={{display:'inline-flex',alignItems:'center',gap:'.3rem',padding:'.18rem .45rem',background:'rgba(0,230,138,0.1)',border:'1px solid rgba(0,230,138,0.3)',borderRadius:5,fontSize:'.62rem',fontFamily:'var(--mono)',color:'var(--green)',textTransform:'uppercase',letterSpacing:'.06em',cursor:'help'}}>
                 <span style={{width:6,height:6,borderRadius:'50%',background:'var(--green)',boxShadow:'0 0 6px var(--green)'}}></span>LIVE
               </span>
-            )}
-            {!isLive && !loading && (
-              <span style={{fontSize:'.7rem',color:'var(--text-dim)',fontFamily:'var(--mono)'}}>● demo data — connect Supabase in Settings for live</span>
             )}
           </div>
         </div>
@@ -2414,8 +2282,8 @@ function CreateView() {
     })();
 
     const input = {
-      brand_name: settingsCache.company || 'Rara Avis Marketing LLC',
-      handle: settingsCache.handle || '@LaminSNgobeh',
+      brand_name: settingsCache.company || '',
+      handle: settingsCache.handle || '',
       primary_color: settingsCache.primaryColor || '#F5C800',
       accent_color_1: settingsCache.accentColor || '#111111',
       accent_color_2: '#FFFFFF',
@@ -3493,7 +3361,7 @@ function EditorView() {
    ============================================================ */
 function EmailStudioView() {
   const {addToast} = useApp();
-  const [selectedContent, setSelectedContent] = useState(MOCK_CONTENT[0]);
+  const [selectedContent, setSelectedContent] = useState(null);
   const [previewMode, setPreviewMode] = useState('desktop');
 
   return (
@@ -3510,7 +3378,7 @@ function EmailStudioView() {
             <div className="card-head"><h3>Content Source</h3></div>
             <label className="field">
               <span className="lbl">Select Video Clip</span>
-              <select className="input" value={selectedContent.id} onChange={e => setSelectedContent(MOCK_CONTENT.find(c => c.id === +e.target.value))}>
+              <select className="input" value={selectedContent?.id || ''} onChange={e => setSelectedContent(MOCK_CONTENT.find(c => c.id === +e.target.value))}>
                 {MOCK_CONTENT.filter(c=>c.status==='published').map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
             </label>
@@ -3537,7 +3405,7 @@ function EmailStudioView() {
           <div className="card">
             <div className="card-head"><h3>Resend API</h3></div>
             <label className="field"><span className="lbl">API Key</span><input className="input" type="password" defaultValue="re_••••••••••••" /></label>
-            <label className="field"><span className="lbl">From</span><input className="input" defaultValue="lamin@raraavismarketing.com" /></label>
+            <label className="field"><span className="lbl">From</span><input className="input" defaultValue={SUPPORT_EMAIL} /></label>
             <label className="field"><span className="lbl">Subject Line</span><input className="input" defaultValue="[Video Inside] Why Most AI Tools Fail" /></label>
             <button className="btn btn-ghost btn-sm" style={{width:'100%'}} onClick={() => addToast('Resend API connected!','success')}>Test Connection</button>
           </div>
@@ -3555,8 +3423,8 @@ function EmailStudioView() {
           <div style={{maxWidth:previewMode==='mobile'?360:'100%',margin:'0 auto'}}>
             <div className="email-preview">
               <div className="email-header">
-                <div style={{fontSize:'.75rem',color:'#888',marginBottom:'.25rem'}}>From: Lamin S. Ngobeh &lt;lamin@raraavismarketing.com&gt;</div>
-                <div style={{fontSize:'.85rem',fontWeight:700,color:'#111'}}>[Video Inside] {selectedContent.title}</div>
+                <div style={{fontSize:'.75rem',color:'#888',marginBottom:'.25rem'}}>From: Supernova Editor &lt;{SUPPORT_EMAIL}&gt;</div>
+                <div style={{fontSize:'.85rem',fontWeight:700,color:'#111'}}>[Video Inside] {selectedContent?.title || 'No content selected'}</div>
               </div>
               <div className="email-body">
                 <p style={{marginBottom:'1rem',fontSize:'.9rem',lineHeight:1.6}}>Hey there,</p>
@@ -3575,7 +3443,7 @@ function EmailStudioView() {
                 <p style={{fontSize:'.9rem',lineHeight:1.6,marginBottom:'1rem'}}>The key insight: you don't need AI to do your job faster — you need AI to do the job you didn't know existed.</p>
                 <p style={{fontSize:'.9rem',lineHeight:1.6}}>Comment "DECISIONS" on my latest post and I'll send you the full framework.</p>
                 <div style={{borderTop:'1px solid #eee',marginTop:'1.5rem',paddingTop:'1rem',fontSize:'.75rem',color:'#888'}}>
-                  Sent with Resend &middot; Rara Avis Marketing LLC &middot; @LaminSNgobeh
+                  Sent with Supernova Editor
                 </div>
               </div>
             </div>
@@ -3591,7 +3459,7 @@ function EmailStudioView() {
    ============================================================ */
 function TranslateView() {
   const {addToast} = useApp();
-  const [selectedContent, setSelectedContent] = useState(MOCK_CONTENT[0]);
+  const [selectedContent, setSelectedContent] = useState(null);
   const [selectedLangs, setSelectedLangs] = useState(['es','pt','fr','zh']);
   const [previewLang, setPreviewLang] = useState('es');
   const toggleLang = (code) => setSelectedLangs(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
@@ -3615,7 +3483,7 @@ function TranslateView() {
         <div className="card">
           <div className="card-head"><h3>Source Content</h3><span className="type-tag">EN</span></div>
           <label className="field"><span className="lbl">Content Piece</span>
-            <select className="input" value={selectedContent.id} onChange={e => setSelectedContent(MOCK_CONTENT.find(c => c.id === +e.target.value))}>
+            <select className="input" value={selectedContent?.id || ''} onChange={e => setSelectedContent(MOCK_CONTENT.find(c => c.id === +e.target.value))}>
               {MOCK_CONTENT.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
             </select>
           </label>
@@ -3777,7 +3645,7 @@ function PublishView() {
 
             <label className="field">
               <span className="lbl">Mentions / Tags</span>
-              <input className="input" value={postMentions} onChange={e => setPostMentions(e.target.value)} placeholder="@LaminSNgobeh @collaborator" />
+              <input className="input" value={postMentions} onChange={e => setPostMentions(e.target.value)} placeholder="@yourbrand @collaborator" />
             </label>
 
             <label className="field">
@@ -4273,12 +4141,12 @@ function SettingsView() {
   const [settingsTab, setSettingsTab] = useState('profile');
   const [showKeys, setShowKeys] = useState({});
   const [settings, setSettings] = useState({
-    name:'Lamin S. Ngobeh',handle:'@LaminSNgobeh',company:'Rara Avis Marketing LLC',email:'mr.ngobeh@gmail.com',
-    bio:'Building AI-powered businesses. 200+ agents deployed across 5 companies. Content machine operator.',
-    industry:'AI / Marketing / SaaS',website:'raraavismarketing.com',phone:'+1 (302) 555-0147',
+    name:'',handle:'',company:'',email:'',
+    bio:'',
+    industry:'',website:'',phone:'',
     timezone:'America/New_York',
-    goals:['Scale content to 5 platforms','Hit 500K monthly views','Build email list to 50K','Launch 3 new businesses'],
-    socialIG:'@LaminSNgobeh',socialTT:'@LaminSNgobeh',socialYT:'LaminSNgobeh',socialLI:'in/laminngobeh',socialX:'@LaminSNgobeh',
+    goals:[],
+    socialIG:'',socialTT:'',socialYT:'',socialLI:'',socialX:'',
     supabaseUrl: localStorage.getItem('eos-sb-url') || '',
     supabaseKey: localStorage.getItem('eos-sb-key') || '',
     anthropicKey:'sk-ant-••••••••••••••••••••',ideogramKey:'ig-••••••••••••••••',telegramToken:'8772192065:AAHB••••••••••••',resendKey:'re_••••••••••••••••',ghlKey:'ghl-••••••••••••',n8nKey:'n8n-••••••••••••',
@@ -4979,7 +4847,7 @@ function ThumbnailStudioView() {
               <div style={{background:'#111',borderRadius:'var(--radius-lg)',overflow:'hidden',border:'1px solid var(--border)'}}>
                 <div style={{padding:'.5rem .75rem',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'.5rem'}}>
                   <div style={{width:24,height:24,borderRadius:'50%',background:'var(--gradient-warm)'}}></div>
-                  <div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-muted)'}}>@LaminSNgobeh</div>
+                  <div style={{fontFamily:'var(--mono)',fontSize:'.65rem',color:'var(--text-muted)'}}>@yourbrand</div>
                 </div>
                 <div style={{aspectRatio:currentSize.w+'/'+currentSize.h,background:bgColor,display:'grid',placeItems:'center'}}>
                   <div style={{fontFamily:'var(--display)',fontSize:'.8rem',fontWeight:800,color:'#fff',textAlign:'center',padding:'.5rem'}}>{thumbText}</div>
@@ -5480,7 +5348,7 @@ function CollageModeView() {
    ============================================================ */
 function RepurposerView() {
   const {addToast} = useApp();
-  const [source, setSource] = useState(MOCK_CONTENT[2]); // long-form
+  const [source, setSource] = useState(null);
   const [selectedFormats, setSelectedFormats] = useState(['carousel','clips','email','blog','quote-cards','thread']);
 
   const formats = [
@@ -5502,7 +5370,7 @@ function RepurposerView() {
     <div className="view-enter">
       <div className="view-head">
         <div><h1>Repurposer</h1><div className="sub">One piece of content becomes 20+ derivatives across every format.</div></div>
-        <button className="btn btn-primary" onClick={() => addToast(`Generating ${selectedFormats.length} formats from "${source.title}"...`,'success')}>Repurpose ({selectedFormats.length})</button>
+        <button className="btn btn-primary" onClick={() => source ? addToast(`Generating ${selectedFormats.length} formats from "${source.title}"...`,'success') : addToast('Select content to repurpose','error')}>Repurpose ({selectedFormats.length})</button>
       </div>
 
       <div className="grid-2">
@@ -5514,12 +5382,18 @@ function RepurposerView() {
             </select>
           </label>
           <div style={{padding:'1rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)'}}>
-            <div style={{fontWeight:700,fontSize:'1.05rem',marginBottom:'.5rem'}}>{source.title}</div>
-            <div style={{display:'flex',gap:'.5rem',marginBottom:'.5rem'}}>
-              <span className="type-tag">{source.type}</span>
-              <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:source.status==='published'?'var(--green)':'var(--text-dim)',textTransform:'uppercase'}}>{source.status}</span>
-            </div>
-            {source.views > 0 && <div style={{fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-dim)'}}>{(source.views/1000).toFixed(1)}K views &middot; {source.saves.toLocaleString()} saves &middot; {source.shares.toLocaleString()} shares</div>}
+            {source ? (
+              <>
+                <div style={{fontWeight:700,fontSize:'1.05rem',marginBottom:'.5rem'}}>{source.title}</div>
+                <div style={{display:'flex',gap:'.5rem',marginBottom:'.5rem'}}>
+                  <span className="type-tag">{source.type}</span>
+                  <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:source.status==='published'?'var(--green)':'var(--text-dim)',textTransform:'uppercase'}}>{source.status}</span>
+                </div>
+                {source.views > 0 && <div style={{fontFamily:'var(--mono)',fontSize:'.75rem',color:'var(--text-dim)'}}>{(source.views/1000).toFixed(1)}K views &middot; {source.saves.toLocaleString()} saves &middot; {source.shares.toLocaleString()} shares</div>}
+              </>
+            ) : (
+              <div style={{color:'var(--text-dim)',fontSize:'.9rem'}}>No content yet — create your first piece to repurpose it.</div>
+            )}
           </div>
           <div style={{marginTop:'1rem',padding:'1rem',background:'rgba(255,214,10,0.05)',border:'1px solid rgba(255,214,10,0.15)',borderRadius:'var(--radius-lg)'}}>
             <div style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--yellow)',fontWeight:700,marginBottom:'.35rem'}}>REPURPOSING POTENTIAL</div>
@@ -5853,7 +5727,7 @@ function CollaborationView() {
         status: 'sent',
         caption: `Most people think AI automation is about saving time.\n\nIt's actually about making decisions you didn't know you were missing.\n\nHere's what changed when I deployed my first AI agent...\n\nComment "DECISIONS" and I'll send you the full framework.\n\n${hashtags.slice(0,3).join(' ')}`,
         hashtags: hashtags,
-        mentions: ['@LaminSNgobeh'],
+        mentions: [],
         scheduled_for: scheduledFor.toISOString(),
         utm_link: `https://supernova.app/r/${camp.id}/${cid}?utm_source=${col.platform}&utm_medium=collab&utm_campaign=${encodeURIComponent(camp.name)}`,
         sent_at: new Date().toISOString(),
@@ -6182,7 +6056,7 @@ function CollaborationView() {
               <div style={{maxWidth:previewMode==='mobile'?360:'100%',margin:'0 auto'}}>
                 <div className="email-preview">
                   <div className="email-header">
-                    <div style={{fontSize:'.72rem',color:'#888',marginBottom:'.15rem'}}>From: Supernova Editor &lt;lamin@raraavismarketing.com&gt;</div>
+                    <div style={{fontSize:'.72rem',color:'#888',marginBottom:'.15rem'}}>From: Supernova Editor &lt;{SUPPORT_EMAIL}&gt;</div>
                     <div style={{fontSize:'.85rem',fontWeight:700,color:'#111'}}>[Action Required] Your Content Package is Ready</div>
                   </div>
                   <div className="email-body" style={{fontSize:'.88rem',lineHeight:1.7}}>
@@ -8287,7 +8161,7 @@ function PlanPicker() {
       return;
     }
     if (plan === 'enterprise') {
-      window.location.href = 'mailto:lamin@raraavismarketing.com?subject=Supernova%20Enterprise';
+      window.location.href = `mailto:${SUPPORT_EMAIL}?subject=Supernova%20Enterprise`;
       return;
     }
     setBusy(plan);
@@ -10683,7 +10557,7 @@ const CAMERA_LAYOUTS = [
 
 function LiveStreamView() {
   const {addToast} = useApp();
-  const [title, setTitle] = useState('Live with Lamin — ' + new Date().toLocaleDateString());
+  const [title, setTitle] = useState('Live Stream — ' + new Date().toLocaleDateString());
   const [aspect, setAspect] = useState('16x9');
   const [layout, setLayout] = useState('pip-br');
   const [picked, setPicked] = useState({facebook:true, instagram:true, youtube:false, tiktok:false, twitter:false, linkedin:false, twitch:false, kick:false});
@@ -11076,7 +10950,8 @@ function LegalView() {
 
 const LEGAL_ENTITY = 'Supernova Editor (a Rara Avis Marketing product)';
 const LEGAL_ADDRESS = 'Wilmington, DE 19801, USA';
-const LEGAL_EMAIL = 'support@raraavismarketing.com';
+const LEGAL_EMAIL = 'support@supernovaeditor.com';
+const SUPPORT_EMAIL = 'support@supernovaeditor.com';
 const EFFECTIVE_DATE = 'April 19, 2026';
 
 function TermsOfService() {
