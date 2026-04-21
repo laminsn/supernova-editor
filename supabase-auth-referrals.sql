@@ -119,7 +119,14 @@ CREATE INDEX IF NOT EXISTS plan_events_profile_idx ON plan_events(profile_id, cr
 -- Helper: generate a unique referral_slug from a base name.
 -- Tries lowercase first name, falls back to first-last, then appends counter.
 -- ============================================================
-CREATE OR REPLACE FUNCTION generate_referral_slug(base_name text) RETURNS text AS $$
+-- search_path MUST be pinned: this function is called from handle_new_auth_user
+-- which fires from a trigger in the auth schema's session context. Without
+-- the pinned path, the unqualified `FROM profiles` resolves to `auth.profiles`
+-- (doesn't exist), the trigger fails, and GoTrue returns "Database error
+-- saving new user" on every signup.
+CREATE OR REPLACE FUNCTION generate_referral_slug(base_name text) RETURNS text
+  LANGUAGE plpgsql SET search_path = public, pg_temp
+AS $$
 DECLARE
   base_slug text;
   candidate text;
@@ -136,12 +143,19 @@ BEGIN
   END LOOP;
   RETURN candidate;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- ============================================================
 -- Trigger: auto-create profile on auth.users insert with unique slug.
 -- ============================================================
-CREATE OR REPLACE FUNCTION handle_new_auth_user() RETURNS trigger AS $$
+-- search_path MUST be pinned. This function is called from an AFTER INSERT
+-- trigger on auth.users where the session search_path is just 'auth, ...'.
+-- Without this SET clause, the unqualified `INSERT INTO profiles` resolves
+-- to `auth.profiles` (doesn't exist), the trigger fails, and GoTrue returns
+-- "Database error saving new user" on every signup including OAuth.
+CREATE OR REPLACE FUNCTION handle_new_auth_user() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
 DECLARE
   base_first text;
   base_display text;
@@ -173,7 +187,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
   RETURN new;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created

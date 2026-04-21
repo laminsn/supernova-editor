@@ -8,9 +8,13 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+// Migration order — schema first, then feature tables (each with permissive
+// placeholder policies), then strict RLS at the END so it overrides those
+// placeholders, then the 2026-04-21 lockdown on top.
+// NOTE: supabase-rls-demo.sql is intentionally excluded — it was dev-only
+// permissive scaffolding that leaks data. Use strict + lockdown instead.
 const MIGRATIONS = [
   'supabase-schema.sql',
-  'supabase-rls-demo.sql',
   'supabase-strategy-type.sql',
   'supabase-brain-score.sql',
   'supabase-workflows-blog.sql',
@@ -19,6 +23,9 @@ const MIGRATIONS = [
   'supabase-quotas-comments.sql',
   'supabase-storage.sql',
   'supabase-calendar-newsletter.sql',
+  'supabase-v41-extensions.sql',
+  'supabase-rls-strict.sql',
+  'supabase-lockdown-2026-04-21.sql',
 ];
 
 // Postgres SQLSTATE codes that mean "already exists" / safe to skip.
