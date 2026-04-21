@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "functions": {
+    "api/generate-strategy.js":       { "maxDuration": 300 },
+    "api/generate-strategy-quick.js": { "maxDuration": 300 },
+    "api/generate-carousel.js":       { "maxDuration": 120 }
+  },
   "headers": [
     {
       "source": "/(.*)",

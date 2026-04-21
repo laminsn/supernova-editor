@@ -1192,7 +1192,12 @@ if (typeof window !== 'undefined') {
   window.SupabaseClient = SupabaseClient;
   // Production defaults — anon key is browser-safe (RLS gates real access).
   // Settings → Advanced lets a user override with a different project.
-  const DEFAULT_SB_URL = 'https://ysjjgzxnedlrjlickuze.supabase.co';
+  // Custom Supabase domain (api.supernovaeditor.com → ysjjgzxnedlrjlickuze
+  // via Supabase Custom Hostname add-on). Keep this pointed at the custom
+  // domain — the Google OAuth client is registered with
+  // api.supernovaeditor.com/auth/v1/callback as an authorized redirect URI,
+  // so pointing the default back at the raw Supabase hostname breaks sign-in.
+  const DEFAULT_SB_URL = 'https://api.supernovaeditor.com';
   const DEFAULT_SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzampnenhuZWRscmpsaWNrdXplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MjUxNDIsImV4cCI6MjA5MjIwMTE0Mn0.IqQyxhgPj-lXu5_eA8bfLGC6Khrq1-wLfpbIJI67gyw';
   const url = localStorage.getItem('eos-sb-url') || DEFAULT_SB_URL;
   const key = localStorage.getItem('eos-sb-key') || DEFAULT_SB_KEY;
@@ -2251,8 +2256,8 @@ const SHORT_FORM_OUTPUTS = [
   {id:'sf18',label:'Hashtag Strategy',desc:'Research-based hashtag groups by reach tier'},
   {id:'sf19',label:'Companion Carousel (9 slides)',desc:'9 slides + 27 Ideogram image prompts'},
   {id:'sf20',label:'Series Expansion (7 videos)',desc:'Series arc with episode briefs'},
-  {id:'sf21',label:'Notion Lead Magnet Brief',desc:'Comprehensive guide outline + structure'},
-  {id:'sf22',label:'GHL Automation Setup',desc:'GoHighLevel workflow + triggers + DM sequence'},
+  {id:'sf21',label:'Beehiiv/Blog Gated Post Brief',desc:'v4.1 — Empire Agent JSON instruction + 5-section gated page brief + multi-channel notification copy'},
+  {id:'sf22',label:'Omni-Channel Automation Setup',desc:'v4.1 — 5 systems: Comment Keyword, Content Drop Notification, New Follower Capture, Empire Agent CTA, KPI Dashboard'},
 ];
 
 const LONG_FORM_OUTPUTS = [
@@ -2291,6 +2296,10 @@ const DEFAULT_PRESET = {name:'Default — Full Suite',outputs:ALL_OUTPUTS.map(o=
 const QUICK_SHORT_PRESET = {name:'Quick Short-Form',outputs:['sf1','sf2','sf4','sf6','sf7','sf11','sf17']};
 const CAROUSEL_PRESET = {name:'Carousel + Lead Magnet',outputs:['sf1','sf2','sf4','sf19','sf21','sf22','ex1']};
 const YOUTUBE_PRESET = {name:'YouTube Deep Dive',outputs:LONG_FORM_OUTPUTS.map(o=>o.id).concat(['ex1','ex3'])};
+// v4.1 — Master Content Prompt presets. Triggers calls to /api/generate-strategy*
+// (real Claude calls, not the legacy MOCK_STRATEGY_OUTPUT typewriter).
+const MASTER_V41_FULL_PRESET = {name:'Master v4.1 — Full (Orchestrated)',outputs:ALL_OUTPUTS.map(o=>o.id),v41Mode:'orchestrated'};
+const MASTER_V41_QUICK_PRESET = {name:'Master v4.1 — Quick (Single Call)',outputs:ALL_OUTPUTS.map(o=>o.id),v41Mode:'quick'};
 
 function CreateView() {
   const {addToast, setLatestStrategy, setVaultOpen, setView} = useApp();
@@ -2309,8 +2318,20 @@ function CreateView() {
   const outputRef = useRef(null);
   const [selectedOutputs, setSelectedOutputs] = useState(new Set(ALL_OUTPUTS.map(o=>o.id)));
   const [presetMode, setPresetMode] = useState('default');
-  const [customPresets, setCustomPresets] = useState([QUICK_SHORT_PRESET, CAROUSEL_PRESET, YOUTUBE_PRESET]);
+  const [customPresets, setCustomPresets] = useState([MASTER_V41_FULL_PRESET, MASTER_V41_QUICK_PRESET, QUICK_SHORT_PRESET, CAROUSEL_PRESET, YOUTUBE_PRESET]);
   const [showOutputs, setShowOutputs] = useState(false);
+  // v4.1 mode + Section A advanced fields (22-27). Persists in localStorage.
+  const [v41Mode, setV41Mode] = useState(null); // null | 'quick' | 'orchestrated'
+  const [v41Model, setV41Model] = useState('claude-sonnet-4-6');
+  const [v41Open, setV41Open] = useState(false);
+  const [v41Fields, setV41Fields] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('eos-v41-section-a') || '{}'); } catch(e) { return {}; }
+  });
+  const updateV41Field = (key, val) => setV41Fields(prev => {
+    const next = {...prev, [key]: val};
+    try { localStorage.setItem('eos-v41-section-a', JSON.stringify(next)); } catch(e) {}
+    return next;
+  });
 
   const toggleOutput = (id) => setSelectedOutputs(prev => {
     const next = new Set(prev);
@@ -2320,7 +2341,14 @@ function CreateView() {
 
   const applyPreset = (preset) => {
     setSelectedOutputs(new Set(preset.outputs));
-    addToast(`Preset "${preset.name}" applied — ${preset.outputs.length} outputs selected`, 'success');
+    setV41Mode(preset.v41Mode || null);
+    if (preset.v41Mode) setV41Open(true);
+    addToast(
+      preset.v41Mode
+        ? `v4.1 ${preset.v41Mode} mode armed — fill Section A fields below, then generate`
+        : `Preset "${preset.name}" applied — ${preset.outputs.length} outputs selected`,
+      'success'
+    );
   };
 
   const saveCustomPreset = () => {
@@ -2343,24 +2371,120 @@ function CreateView() {
   const allPass = gates.every(g => g.status === 'pass');
   const aiScore = useMemo(() => topic.length > 25 ? Math.min(99, 40 + Math.floor(topic.length * 1.2)) : topic.length > 10 ? 30 + topic.length : 0, [topic]);
 
-  const handleGenerate = () => {
-    if (!allPass) return;
-    setGenerating(true); setOutput(''); setApproved(false);
+  // Animate text by revealing chunks — used by both real-API and mock paths.
+  const animateOutput = (text, onDone) => {
     let i = 0;
-    const text = MOCK_STRATEGY_OUTPUT;
     const interval = setInterval(() => {
-      i += 3;
+      i += 12;
       setOutput(text.slice(0, i));
       if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
       if (i >= text.length) {
         clearInterval(interval);
+        setOutput(text);
         setGenerating(false);
-        // Auto-save to Strategy Vault then auto-score
+        onDone && onDone(text);
+      }
+    }, 8);
+  };
+
+  const handleGenerate = async () => {
+    if (!allPass) return;
+    setGenerating(true); setOutput(''); setApproved(false);
+
+    // Legacy path: presets without a v41Mode still use the demo mock.
+    // (Kept so existing UX behaves identically when v4.1 isn't selected.)
+    if (!v41Mode) {
+      animateOutput(MOCK_STRATEGY_OUTPUT, (text) => {
         saveToVault(text).then(savedId => {
           setTimeout(() => runBrainScore(savedId), 400);
         });
+      });
+      return;
+    }
+
+    // v4.1 path — real Claude generation via /api/generate-strategy(-quick).
+    // Section A is auto-filled from settings + topic; user can override the
+    // 6 new v4.1 fields (22-27) via the collapsible panel below the topic.
+    const sb = window.SupabaseClient;
+    const sbUrl = localStorage.getItem('eos-sb-url');
+    const sbKey = localStorage.getItem('eos-sb-key');
+    const settingsCache = (() => {
+      try { return JSON.parse(localStorage.getItem('eos-settings') || '{}'); }
+      catch(e) { return {}; }
+    })();
+
+    const input = {
+      brand_name: settingsCache.company || 'Rara Avis Marketing LLC',
+      handle: settingsCache.handle || '@LaminSNgobeh',
+      primary_color: settingsCache.primaryColor || '#F5C800',
+      accent_color_1: settingsCache.accentColor || '#111111',
+      accent_color_2: '#FFFFFF',
+      target_audience: v41Fields.target_audience || settingsCache.bio || '(audience from Section A)',
+      industry: settingsCache.industry || 'AI / Marketing / SaaS',
+      expertise: v41Fields.expertise || `${settingsCache.name || ''}`.trim() || 'AI automation consultant',
+      personal_angle: v41Fields.personal_angle || '',
+      short_form_topic: contentType === 'long' ? '' : topic,
+      long_form_topic:  contentType === 'short' ? '' : topic,
+      content_language: v41Fields.content_language || 'English',
+      posting_platforms: v41Fields.posting_platforms || 'Instagram Reels, TikTok, YouTube Shorts, YouTube (long-form), LinkedIn',
+      audience_location: v41Fields.audience_location || (settingsCache.timezone || 'America/New_York') + ' (primary)',
+      comment_keyword: v41Fields.comment_keyword || (topic.split(' ')[0] || 'GUIDE').toUpperCase(),
+      lead_magnet_short: v41Fields.lead_magnet_short || 'Companion guide PDF',
+      lead_magnet_long: v41Fields.lead_magnet_long || 'Full system PDF + template library',
+      video_tone: v41Fields.video_tone || 'Confident, direct, warm. Senior practitioner sharing hard-won knowledge.',
+      series_context: v41Fields.series_context || 'Standalone',
+      ghl_destination: v41Fields.ghl_destination || (v41Fields.ghl_list_name ? `GHL pipeline: ${v41Fields.ghl_list_name}` : ''),
+      series_vision: v41Fields.series_vision || 'TBD',
+      // v4.1-NEW (Fields 22-27)
+      blog_base_url: v41Fields.blog_base_url || '',
+      ghl_list_name: v41Fields.ghl_list_name || '',
+      whatsapp_telegram: v41Fields.whatsapp_telegram || '',
+      linkedin_dm_strategy: v41Fields.linkedin_dm_strategy || '',
+      new_follower_flow: v41Fields.new_follower_flow || '',
+      empire_agent_map: v41Fields.empire_agent_map || '',
+    };
+
+    const endpoint = v41Mode === 'orchestrated' ? '/api/generate-strategy' : '/api/generate-strategy-quick';
+    addToast(`Generating v4.1 (${v41Mode}) — this can take 30-90s...`, 'info');
+
+    try {
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          input,
+          save: true,
+          workspace_id: sb?.getWorkspaceId?.() || null,
+          supabase_url: sbUrl,
+          supabase_key: sbKey,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({error: r.statusText}));
+        addToast(`Generation failed: ${err.error || r.status}`, 'error');
+        setGenerating(false);
+        return;
       }
-    }, 8);
+      const data = await r.json();
+      const md = data.markdown || '';
+      if (!md) {
+        addToast('Empty response from generator', 'error');
+        setGenerating(false);
+        return;
+      }
+      if (data.model) setV41Model(data.model);
+      if (v41Mode === 'orchestrated' && data.failed_count > 0) {
+        addToast(`${data.failed_count} of ${data.batches?.length || 11} batches failed — partial output rendered`, 'info');
+      }
+      animateOutput(md, (text) => {
+        saveToVault(text).then(savedId => {
+          setTimeout(() => runBrainScore(savedId), 400);
+        });
+      });
+    } catch (e) {
+      addToast(`Network error: ${e.message}`, 'error');
+      setGenerating(false);
+    }
   };
 
   const saveToVault = async (outputText) => {
@@ -2606,6 +2730,38 @@ function CreateView() {
         <div className="gates">
           {gates.map(g => <div key={g.label} className={`gate ${g.status}`}>{g.status === 'pass' ? '✓' : '○'} {g.label}</div>)}
         </div>
+        {/* v4.1 SECTION A — only renders when a Master v4.1 preset is armed */}
+        {v41Mode && (
+          <div style={{marginTop:'1.25rem',padding:'1rem',background:'rgba(255,214,10,0.04)',borderRadius:'var(--radius-lg)',border:'1px solid var(--yellow-glow)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}} onClick={() => setV41Open(!v41Open)}>
+              <div>
+                <span style={{fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--yellow)',letterSpacing:'.1em',fontWeight:700}}>v4.1 SECTION A · 6 NEW FIELDS (22-27)</span>
+                <div style={{fontSize:'.72rem',color:'var(--text-dim)',marginTop:'.2rem'}}>Mode: <strong style={{color:'var(--yellow)'}}>{v41Mode}</strong> · Powers Empire Agent CTAs, Omni-Channel notifications, LinkedIn DM pipeline, KPI dashboard.</div>
+              </div>
+              <span style={{color:'var(--text-dim)',transform:v41Open?'rotate(180deg)':'',transition:'transform .2s',fontSize:'.8rem'}}>&#9660;</span>
+            </div>
+            {v41Open && (
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.75rem',marginTop:'1rem'}}>
+                <label className="field" style={{gridColumn:'span 2'}}><span className="lbl">22 — Blog / Beehiiv Base URL</span><input className="input" placeholder="https://rara-avis.com/blog" value={v41Fields.blog_base_url || ''} onChange={e => updateV41Field('blog_base_url', e.target.value)} /></label>
+                <label className="field"><span className="lbl">23 — GHL Email Subscriber List Name</span><input className="input" placeholder="Rara Avis Master List" value={v41Fields.ghl_list_name || ''} onChange={e => updateV41Field('ghl_list_name', e.target.value)} /></label>
+                <label className="field"><span className="lbl">24 — WhatsApp Broadcast + Telegram Channel</span><input className="input" placeholder="WA: AI Army Daily | TG: @RaraAvisAI" value={v41Fields.whatsapp_telegram || ''} onChange={e => updateV41Field('whatsapp_telegram', e.target.value)} /></label>
+                <label className="field" style={{gridColumn:'span 2'}}><span className="lbl">25 — LinkedIn DM Strategy</span><textarea className="input" rows="2" placeholder="Trigger: every new long-form. Tone: warm, personal. Action: share gated blog. 1st-degree connections only." value={v41Fields.linkedin_dm_strategy || ''} onChange={e => updateV41Field('linkedin_dm_strategy', e.target.value)} /></label>
+                <label className="field" style={{gridColumn:'span 2'}}><span className="lbl">26 — New Follower Capture Flow</span><textarea className="input" rows="2" placeholder="DM within 24hrs: free CRAFT Library (5 templates). Phone optional. Day 3: Happier Homes story. Day 7: Audit call." value={v41Fields.new_follower_flow || ''} onChange={e => updateV41Field('new_follower_flow', e.target.value)} /></label>
+                <label className="field" style={{gridColumn:'span 2'}}><span className="lbl">27 — Empire Agent Pipeline Map (one business per line)</span><textarea className="input" rows="4" placeholder={'Rara Avis → AI Army → rara-avis.com/blog\nHappier Homes → Healthcare AI → happierhomes.com/blog\nFirst Nation Fidelity → Lending Leads → firstnationfidelity.com/blog\nBrazil Escrow → International RE → brazilescrow.com/blog'} value={v41Fields.empire_agent_map || ''} onChange={e => updateV41Field('empire_agent_map', e.target.value)} /></label>
+                <details style={{gridColumn:'span 2',padding:'.5rem .75rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',fontSize:'.78rem'}}>
+                  <summary style={{cursor:'pointer',color:'var(--text-dim)',fontFamily:'var(--mono)',fontSize:'.7rem',letterSpacing:'.08em'}}>OVERRIDE FIELDS 1-21 (defaults pulled from Settings)</summary>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem',marginTop:'.6rem'}}>
+                    <label className="field" style={{gridColumn:'span 2'}}><span className="lbl">9 — Personal Angle (specific number/cost/outcome)</span><textarea className="input" rows="2" placeholder="Built the NEXUS dashboard in 6 hrs vs $18K agency quote — the gap this business closes." value={v41Fields.personal_angle || ''} onChange={e => updateV41Field('personal_angle', e.target.value)} /></label>
+                    <label className="field"><span className="lbl">15 — Comment Keyword</span><input className="input" placeholder="CRAFT" value={v41Fields.comment_keyword || ''} onChange={e => updateV41Field('comment_keyword', e.target.value)} /></label>
+                    <label className="field"><span className="lbl">12 — Content Language</span><input className="input" placeholder="English" value={v41Fields.content_language || ''} onChange={e => updateV41Field('content_language', e.target.value)} /></label>
+                    <label className="field"><span className="lbl">16 — Lead Magnet (short-form)</span><input className="input" placeholder="5-template CRAFT prompt library" value={v41Fields.lead_magnet_short || ''} onChange={e => updateV41Field('lead_magnet_short', e.target.value)} /></label>
+                    <label className="field"><span className="lbl">17 — Lead Magnet (long-form)</span><input className="input" placeholder="Complete CRAFT Master System PDF" value={v41Fields.lead_magnet_long || ''} onChange={e => updateV41Field('lead_magnet_long', e.target.value)} /></label>
+                  </div>
+                </details>
+              </div>
+            )}
+          </div>
+        )}
         {/* OUTPUT SELECTOR */}
         <div style={{marginTop:'1.25rem',padding:'1rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',border:'1px solid var(--glass-border)'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.75rem',cursor:'pointer'}} onClick={() => setShowOutputs(!showOutputs)}>
@@ -2695,7 +2851,7 @@ function CreateView() {
           <div className="card">
             <div className="card-head"><h3>Strategy Output</h3><span className="type-tag">{contentType.toUpperCase()}</span></div>
             <div style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.35rem .6rem',background:'rgba(255,214,10,0.06)',border:'1px solid var(--yellow-glow)',borderRadius:6,marginBottom:'.6rem',fontSize:'.66rem',fontFamily:'var(--mono)',color:'var(--yellow)',textTransform:'uppercase',letterSpacing:'.06em',width:'fit-content'}}>
-              ● Generated by Claude Sonnet 4.5
+              ● Generated by {v41Mode ? v41Model + ' · v4.1 ' + v41Mode : 'Claude Sonnet 4.5 (mock preset)'}
             </div>
             <div className={`strategy-output ${generating ? 'typing-cursor' : ''}`} ref={outputRef}>{output}</div>
           </div>
@@ -2703,7 +2859,7 @@ function CreateView() {
             <div className="card">
               <div className="card-head"><h3>Frameworks Applied</h3></div>
               <div style={{display:'flex',flexDirection:'column',gap:'.4rem'}}>
-                {['HookPoint Methodology','7-Part Content Anatomy','CRAFT Framework','Topic Maxxing (3-Gate)','Content Unit Test','Algorithm Science','Neural Impact Analysis','Email Embed Strategy'].map((f,i) => (
+                {['HookPoint Methodology','7-Part Content Anatomy','CRAFT Framework','Topic Maxxing (3-Gate)','Content Unit Test','Algorithm Science','Neural Impact Analysis','Email Embed Strategy','Omni-Channel Distribution & Compliance (v4.1)'].map((f,i) => (
                   <div key={i} style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.4rem .6rem',background:'var(--glass)',borderRadius:'var(--radius-lg)',fontSize:'.82rem',border:'1px solid var(--glass-border)'}}>
                     <span style={{color:'var(--green)',fontSize:'.7rem'}}>&#10003;</span> {f}
                   </div>
@@ -3859,6 +4015,11 @@ function IntegrationsTab({settings, u, showKeys, toggleKey, addToast}) {
     {key:'telegramToken',     label:'Telegram', icon:'✈️', desc:'Optional. Get notifications + approve content from Telegram.', placeholder:'Bot token (BotFather)', required:false},
     {key:'slackWebhook',      label:'Slack', icon:'💬', desc:'Optional. Pipe alerts into your Slack channel.', placeholder:'Incoming webhook URL', required:false},
     {key:'whatsappPhone',     label:'WhatsApp Business', icon:'🟢', desc:'Optional. Send + receive content via WhatsApp Business.', placeholder:'+1 (555) 123-4567', required:false},
+    // v4.1 Omni-Channel keys (Framework 9 — Outputs 21 + 22)
+    {key:'beehiivKey',              label:'Beehiiv API Key', icon:'📰', desc:'v4.1 — gated blog publishing for Empire Agent CTAs (Field 22). Get from beehiiv.com → Settings → API.', placeholder:'beehiiv_pat_...', required:false},
+    {key:'whatsappBusinessToken',   label:'WhatsApp Business Token', icon:'💚', desc:'v4.1 — Output 22 System B broadcasts. Approved Meta templates only.', placeholder:'EAAG... (Meta token)', required:false},
+    {key:'telegramChannelUsername', label:'Telegram Channel @handle', icon:'📣', desc:'v4.1 — Output 22 System B channel broadcasts. Public channel handle, not a bot token.', placeholder:'@RaraAvisAI', required:false},
+    {key:'linkedinAccessToken',     label:'LinkedIn Access Token', icon:'💼', desc:'v4.1 — Output 22 Systems B+C. 1st-degree DMs only — honors LinkedIn ToS.', placeholder:'AQX... (OAuth token)', required:false},
   ];
 
   const platformIntegrations = [
@@ -4121,6 +4282,8 @@ function SettingsView() {
     supabaseUrl: localStorage.getItem('eos-sb-url') || '',
     supabaseKey: localStorage.getItem('eos-sb-key') || '',
     anthropicKey:'sk-ant-••••••••••••••••••••',ideogramKey:'ig-••••••••••••••••',telegramToken:'8772192065:AAHB••••••••••••',resendKey:'re_••••••••••••••••',ghlKey:'ghl-••••••••••••',n8nKey:'n8n-••••••••••••',
+    // v4.1 Omni-Channel keys (Framework 9). Empty until user configures.
+    beehiivKey:'',whatsappBusinessToken:'',telegramChannelUsername:'',linkedinAccessToken:'',
     craftContext:'Business owners + operators with 0-moderate AI experience',craftRole:'Senior practitioner who lived this',craftTone:'Direct, warm, smart. Never preachy.',
     primaryColor:'#F5C800',accentColor:'#4169E1',bgColor:'#050508',
     notifyEmail:true,notifyTelegram:true,notifySlack:false,
