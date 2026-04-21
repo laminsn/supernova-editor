@@ -263,6 +263,14 @@ CREATE POLICY newsletter_lists_workspace_delete ON newsletter_lists FOR DELETE U
 DROP POLICY IF EXISTS recordings_anon_all ON recordings;
 
 -- STEP 11: workspaces — owner-scoped read/write/insert.
+-- Add owner_id column (missing from schema.sql) so we can scope writes to
+-- the workspace creator. Backfill from profiles.workspace_id.
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS owner_id uuid REFERENCES auth.users(id);
+-- Backfill: pick any member profile as owner for legacy rows. For multi-member
+-- legacy workspaces this is an arbitrary choice; owner can be reassigned later.
+UPDATE workspaces w SET owner_id = (SELECT id FROM profiles p WHERE p.workspace_id = w.id LIMIT 1)
+  WHERE w.owner_id IS NULL;
+
 DROP POLICY IF EXISTS "Members see workspace" ON workspaces;
 DROP POLICY IF EXISTS workspaces_owner_select ON workspaces;
 DROP POLICY IF EXISTS workspaces_owner_write  ON workspaces;
