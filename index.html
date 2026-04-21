@@ -993,11 +993,7 @@ function AppProvider({children}) {
           setCurrentProfile(p);
           if (event === 'SIGNED_IN') {
             setAuthGateOpen(false);
-            // First sign-in (no plan selected yet) → full-page pricing.
-            // Returning users with a plan go straight to dashboard.
-            if (!p?.plan || p.plan === 'free') {
-              setTimeout(() => setView('pricing'), 600);
-            }
+            setTimeout(() => setView('dashboard'), 300);
           }
         } else {
           setCurrentProfile(null);
@@ -1124,7 +1120,7 @@ const SupabaseClient = (() => {
       return data;
     },
     async signIn(email, password) { if (!client) return null; return await client.auth.signInWithPassword({email, password}); },
-    async signUp(email, password, meta = {}) { if (!client) return null; return await client.auth.signUp({email, password, options:{data: meta}}); },
+    async signUp(email, password, meta = {}) { if (!client) return null; return await client.auth.signUp({email, password, options:{data: meta, emailRedirectTo: window.location.origin + '/'}}); },
     async signInWithOAuth(provider, options = {}) {
       if (!client) return {error: {message: 'Supabase not connected. Open Settings → Advanced.'}};
       const redirectTo = options.redirectTo || (window.location.origin + '/');
