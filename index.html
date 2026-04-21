@@ -14,14 +14,15 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <!-- Brand-kit font pairings (Anton, Inter, Space Grotesk, VT323, Major Mono Display, Cormorant Garamond, Lora, Bebas Neue, IBM Plex Mono, Playfair Display, Manrope, Bricolage Grotesque, DM Sans) -->
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;700;900&family=Space+Grotesk:wght@400;500;700&family=VT323&family=Major+Mono+Display&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lora:wght@400;500;700&family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,700&family=Manrope:wght@400;600;800&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,900&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js" integrity="sha384-6vNF1AGqL2k6qDkLWSP+ieIT25Bz7mV6WDtmX3lEeGoOpTWkp81371ED3BbAMkzx"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.104.0/dist/umd/supabase.js" integrity="sha384-UiYSxQXCTojQCBgTDHAa/f6PRkGlvY/sx+VlmFvBi/lpAaq1TzpV7LpzShoUwGbT"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"></script>
 <!-- ffmpeg.wasm 0.12 — UMD bundles. Lazy-init in ExportModal (~25MB cached after first load). -->
-<script src="https://unpkg.com/@ffmpeg/[email protected]/dist/umd/ffmpeg.js"></script>
-<script src="https://unpkg.com/@ffmpeg/[email protected]/dist/umd/util.js"></script>
+<script crossorigin src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js" integrity="sha384-HJcOheArWWImG8iIDY0pbuK4nyRXZYGkzfaCq+ghw2CcjBlDShKWGpC9sTL42Lcu"></script>
+<script crossorigin src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/util.js" integrity="sha384-Sjaw9pFKbYonMsbo0XqT4VweBV+XWKQC+YKYV7eIYRAIIBGjzsgeySu5v4pT6cXi"></script>
 <script>
 // Sentry — lazy-loaded only if a DSN is exposed via window.SUPERNOVA_SENTRY_DSN
 // Inject the DSN at deploy time (Vercel build env → static replace) or via
@@ -685,6 +686,23 @@ label.field .req{color:var(--yellow)}
 
 <script type="text/babel" data-type="module">
 const {useState,useEffect,useRef,useCallback,createContext,useContext,useMemo,useReducer} = React;
+
+// XSS guard for any path that renders server-generated or user-originated
+// HTML via dangerouslySetInnerHTML. DOMPurify is loaded via CDN with SRI
+// (see <script> in <head>). If it ever fails to load we fail closed —
+// empty string — so a broken CDN can't become an XSS vector.
+function sanitizeHtml(raw) {
+  if (raw == null) return '';
+  const str = typeof raw === 'string' ? raw : String(raw);
+  if (typeof window === 'undefined' || !window.DOMPurify) return '';
+  return window.DOMPurify.sanitize(str, {
+    USE_PROFILES: {html: true},
+    FORBID_TAGS: ['style','script','iframe','object','embed','form'],
+    FORBID_ATTR: ['onerror','onload','onclick','onmouseover','onfocus','onblur','onchange','onsubmit','onkeydown','onkeyup','onkeypress','style','srcdoc','formaction'],
+    ALLOW_DATA_ATTR: false,
+    ADD_URI_SAFE_ATTR: ['target'],
+  });
+}
 
 /* ============================================================
    CONSTANTS & MOCK DATA
@@ -7963,7 +7981,7 @@ function BlogBuilderView() {
               </div>
 
               <div style={{maxHeight:'60vh',overflowY:'auto',padding:'1rem',background:'var(--bg-solid-2)',borderRadius:8,marginBottom:'1rem'}}>
-                {activeTab === 'preview' && <div className="blog-preview" dangerouslySetInnerHTML={{__html: result.html}} style={{lineHeight:1.7}}/>}
+                {activeTab === 'preview' && <div className="blog-preview" dangerouslySetInnerHTML={{__html: sanitizeHtml(result.html)}} style={{lineHeight:1.7}}/>}
                 {activeTab === 'html' && <pre style={{fontFamily:'var(--mono)',fontSize:'.72rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{result.html}</pre>}
                 {activeTab === 'markdown' && <pre style={{fontFamily:'var(--mono)',fontSize:'.78rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{result.markdown}</pre>}
                 {activeTab === 'meta' && <pre style={{fontFamily:'var(--mono)',fontSize:'.72rem',whiteSpace:'pre-wrap',color:'var(--text-muted)',margin:0}}>{JSON.stringify(result.meta, null, 2)}</pre>}
@@ -10265,7 +10283,7 @@ function EmailCampaignsView() {
                 <strong>Subject:</strong> {draft.subject}
               </div>
               <hr style={{border:0,borderTop:'1px solid #eee',margin:'.75rem 0'}}/>
-              <div dangerouslySetInnerHTML={{__html: draft.html_body.replace(/\{\{name\}\}/g, 'Friend').replace(/\{\{brand\}\}/g, currentProfile?.display_name || 'Supernova')}}/>
+              <div dangerouslySetInnerHTML={{__html: sanitizeHtml(draft.html_body.replace(/\{\{name\}\}/g, 'Friend').replace(/\{\{brand\}\}/g, currentProfile?.display_name || 'Supernova'))}}/>
             </div>
           </div>
         </div>
