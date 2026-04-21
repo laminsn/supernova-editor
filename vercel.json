@@ -6,6 +6,7 @@
     "api/generate-strategy-quick.js": { "maxDuration": 300 },
     "api/generate-carousel.js":       { "maxDuration": 120 }
   },
+  "ignoreCommand": "bash scripts/v41-health-check.sh",
   "headers": [
     {
       "source": "/(.*)",
