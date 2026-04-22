@@ -846,8 +846,19 @@ function AppProvider({children}) {
   const toggleTheme = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
 
   // Bootstrap auth state and react to OAuth callback redirects.
+  // Race guard: every loadProfile() call bumps `profileReqRef`; stale
+  // responses (whose ticket no longer matches) are discarded so a slow
+  // initial fetch can't overwrite fresher state from onAuthStateChange.
+  const profileReqRef = useRef(0);
   useEffect(() => {
     let detach = () => {};
+    const loadProfileSafe = async (userId) => {
+      const myTicket = ++profileReqRef.current;
+      const p = await window.SupabaseClient.loadProfile(userId);
+      if (myTicket !== profileReqRef.current) return null; // stale; discard
+      setCurrentProfile(p);
+      return p;
+    };
     const init = async () => {
       const sb = window.SupabaseClient;
       if (!sb || !sb.isReady()) { setAuthChecked(true); return; }
@@ -855,8 +866,7 @@ function AppProvider({children}) {
       const user = session?.user || null;
       setCurrentUser(user);
       if (user) {
-        const profile = await sb.loadProfile(user.id);
-        setCurrentProfile(profile);
+        const profile = await loadProfileSafe(user.id);
         // Fire referral conversion if attributed
         const ref = referralAttribution;
         if (ref && profile && !profile.referred_by) {
@@ -880,13 +890,14 @@ function AppProvider({children}) {
         const u = sess?.user || null;
         setCurrentUser(u);
         if (u) {
-          const p = await sb.loadProfile(u.id);
-          setCurrentProfile(p);
+          await loadProfileSafe(u.id);
           if (event === 'SIGNED_IN') {
             setAuthGateOpen(false);
             setTimeout(() => setView('dashboard'), 300);
           }
         } else {
+          // Sign-out: bump ticket so any in-flight loadProfile response is ignored.
+          profileReqRef.current++;
           setCurrentProfile(null);
         }
       });
@@ -8047,7 +8058,15 @@ function AuthGate() {
     e.preventDefault();
     if (!ready) { addToast('Supabase backend not connected. Settings → Advanced.', 'error'); return; }
     if (!email || (mode !== 'magic' && mode !== 'reset' && !password)) { addToast('Fill all fields', 'error'); return; }
-    if (mode === 'signup' && !agreed) { addToast('Please accept the Terms first', 'error'); return; }
+    // Client-side validation — cheap, prevents obvious bad submits.
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+    if (!emailOk) { addToast('Enter a valid email address', 'error'); return; }
+    if (mode === 'signup') {
+      if (!firstName || !firstName.trim()) { addToast('First name is required', 'error'); return; }
+      if (password.length < 8) { addToast('Password must be at least 8 characters', 'error'); return; }
+      if (!agreed) { addToast('Please accept the Terms first', 'error'); return; }
+    }
+    if (mode === 'signin' && password.length < 1) { addToast('Enter your password', 'error'); return; }
     setBusy('email');
     try {
       let result;
@@ -11347,6 +11366,63 @@ function AppShell() {
   );
 }
 
+// React error boundary — previously a thrown render in any view would
+// unmount the whole tree and leave users staring at the near-black --bg
+// with zero signal. Catches, logs, and offers a reset path.
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = {err: null}; }
+  static getDerivedStateFromError(err) { return {err}; }
+  componentDidCatch(err, info) {
+    try { console.error('[ErrorBoundary]', err, info); } catch(_){}
+    try {
+      fetch('/api/log-error', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          message: String(err?.message || err),
+          stack: String(err?.stack || ''),
+          component: String(info?.componentStack || '').slice(0, 2000),
+          url: typeof location !== 'undefined' ? location.href : '',
+          ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+          at: new Date().toISOString(),
+        })
+      }).catch(() => {});
+    } catch(_){}
+  }
+  reset = () => {
+    try {
+      // Preserve Supabase session keys so the reset doesn't log users out.
+      const keep = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('sb-') || k.startsWith('supabase'))) keep[k] = localStorage.getItem(k);
+      }
+      localStorage.clear();
+      for (const k in keep) localStorage.setItem(k, keep[k]);
+    } catch(_){}
+    window.location.href = '/';
+  };
+  render() {
+    if (!this.state.err) return this.props.children;
+    return (
+      <div style={{minHeight:'100vh',display:'grid',placeItems:'center',padding:'2rem',background:'var(--bg)',color:'var(--text)'}}>
+        <div style={{maxWidth:560,textAlign:'center'}}>
+          <h1 style={{fontFamily:'var(--display)',fontWeight:800,fontSize:'2rem',marginBottom:'0.75rem'}}>Something went wrong</h1>
+          <p style={{color:'var(--text-dim)',marginBottom:'1.5rem'}}>We hit an error rendering this page. The team has been notified. Try resetting local state and reloading.</p>
+          <div style={{display:'flex',gap:'0.75rem',justifyContent:'center',flexWrap:'wrap'}}>
+            <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload</button>
+            <button className="btn btn-ghost" onClick={this.reset}>Reset and sign in again</button>
+          </div>
+          <details style={{marginTop:'2rem',textAlign:'left',fontFamily:'var(--mono)',fontSize:'.72rem',color:'var(--text-muted)'}}>
+            <summary style={{cursor:'pointer'}}>Technical detail</summary>
+            <pre style={{whiteSpace:'pre-wrap',marginTop:'.5rem'}}>{String(this.state.err?.message || this.state.err)}</pre>
+          </details>
+        </div>
+      </div>
+    );
+  }
+}
+
 /* ============================================================
    LEAD MAGNET — public standalone strategy view
    ============================================================ */
@@ -11456,6 +11532,16 @@ function App() {
     if (upgraded) {
       addToast('Welcome to your new plan! 🎉', 'success');
     }
+    // Stripe checkout returned with cancel — be explicit about what happened
+    // so a user doesn't wonder whether the payment processed in limbo.
+    if (urlParams?.get('canceled') === '1') {
+      addToast('Checkout canceled. No charge was made.', 'info');
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('canceled');
+        window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
+      } catch(_){}
+    }
     // Surface OAuth error redirects (Supabase + provider). Both query and hash
     // forms occur depending on the flow type.
     const oauthErr = urlParams?.get('error') || urlParams?.get('error_code');
@@ -11515,7 +11601,9 @@ function App() {
   );
   return (
     <>
-      {view === 'landing' ? <LandingPage /> : <AppShell />}
+      <ErrorBoundary>
+        {view === 'landing' ? <LandingPage /> : <AppShell />}
+      </ErrorBoundary>
       <ToastContainer />
       <CommandPalette />
       <StrategyVaultDrawer />
@@ -11525,7 +11613,7 @@ function App() {
   );
 }
 
-ReactDOM.render(<AppProvider><App /></AppProvider>, document.getElementById('root'));
+ReactDOM.render(<ErrorBoundary><AppProvider><App /></AppProvider></ErrorBoundary>, document.getElementById('root'));
 </script>
 </body>
 </html>
