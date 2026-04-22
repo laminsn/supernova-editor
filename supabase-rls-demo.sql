@@ -1,6 +1,19 @@
--- Demo-mode RLS: allow anon read+write
--- Replaces strict workspace-scoped policies with permissive demo policies
--- For production with real auth, run supabase-schema.sql instead
+-- ============================================================
+-- ⛔  DO NOT APPLY TO PRODUCTION  ⛔
+-- ============================================================
+-- This file installs permissive `USING (true)` RLS policies that
+-- allow any authenticated (and sometimes anon) caller to read and
+-- write every other user's data. It was intended for a single-user
+-- dev demo and was removed from the migration runner on 2026-04-21
+-- after the audit confirmed it was the root cause of:
+--   • social_connections OAuth-token leak to every anon caller
+--   • subscriptions + plan_events plan-tier bypass
+--   • profiles PII leak (email, phone, social handles)
+-- Production uses supabase-rls-strict.sql + supabase-lockdown-2026-04-21.sql
+-- instead. This file is kept for reference only; re-introducing it to
+-- the migration chain will regress the entire security posture.
+-- ============================================================
+-- Demo-mode RLS: allow anon read+write (legacy scaffolding)
 
 DROP POLICY IF EXISTS "Members read content" ON content;
 DROP POLICY IF EXISTS "Editors write content" ON content;
